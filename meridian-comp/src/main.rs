@@ -34,24 +34,31 @@ use crate::{backend::Backend, state::Meridian};
 const HELP: &str = "\
 Usage: meridian-comp [--winit | --tty] [COMMAND [ARGS...]]
 
-Runs the Meridian compositor. Inside another desktop it opens as a window
-(nested); from a text console or login manager it takes over the screen.
+Runs the Meridian compositor with the Terra desktop. Inside another desktop
+it opens as a window (nested); from a text console or login manager it takes
+over the screen.
 
   --winit     force nested mode
   --tty       force a real session
   COMMAND     program to start as the first client, e.g. `meridian-comp foot`
 
 Default keys (Mod = Alt when nested, Super in a real session):
+  Super tap, Mod+Space  Find: apps, files, settings, actions
   Mod+Return            open a terminal
   Mod+Q                 close the focused window
-  Mod+T                 switch between floating and tiled layout
   Mod+Tab               focus the next window (add Shift for previous)
+  Mod+1..4              go to a space (add Shift to move the window there)
+  Mod+O                 overview
+  Mod+T                 switch between floating and tiled layout
+  Mod+D                 keyboard to the dock
+  Mod+L                 lock the screen
   Mod+left-drag         move a window
   Mod+right-drag        resize a window
+  Print                 screenshot to ~/Pictures/Screenshots
   Mod+Shift+E           quit Meridian
   Ctrl+Alt+F1..F12      switch virtual terminal (real session only)
 
-Configuration: ~/.config/meridian/config.toml
+Configuration: ~/.config/meridian/config.toml (or the Settings app)
 Example file:  /usr/share/doc/meridian-git/config.toml";
 
 // `anyhow::Result` is a Result whose error type can hold any error. The `?`
@@ -105,6 +112,7 @@ fn main() -> anyhow::Result<()> {
         let tty = backend::tty::init(&event_loop)?;
         let mut state = Meridian::new(&mut event_loop, display, Backend::Tty(Box::new(tty)), config)?;
         state.tty_scan_connectors();
+        export_session_environment(&state.socket_name);
         state
     };
 
@@ -132,6 +140,37 @@ fn main() -> anyhow::Result<()> {
         .context("event loop failed")?;
 
     Ok(())
+}
+
+/// In a real session, tell systemd and D-Bus which Wayland display is ours.
+/// Programs they start on demand (portals, notification senders, apps
+/// launched by D-Bus activation) would otherwise not find the desktop.
+fn export_session_environment(socket_name: &std::ffi::OsStr) {
+    let commands: [&[&str]; 2] = [
+        &["systemctl", "--user", "import-environment", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"],
+        &[
+            "dbus-update-activation-environment",
+            "--systemd",
+            "WAYLAND_DISPLAY",
+            "XDG_CURRENT_DESKTOP",
+        ],
+    ];
+    for command in commands {
+        // `spawn` does not wait: startup must not hang on these.
+        let spawned = std::process::Command::new(command[0])
+            .args(&command[1..])
+            .env("WAYLAND_DISPLAY", socket_name)
+            .env("XDG_CURRENT_DESKTOP", "Meridian")
+            .spawn();
+        match spawned {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(err) => tracing::warn!("could not run {}: {err}", command[0]),
+        }
+    }
 }
 
 /// Log to stderr. Set `RUST_LOG=debug` (or `RUST_LOG=smithay=trace`) for more.

@@ -1,18 +1,28 @@
 # Meridian
 
-A Wayland desktop environment and window manager for Arch Linux, written in Rust
-on top of [Smithay](https://github.com/Smithay/smithay). The goal: the structure
-of macOS (global menu bar, dock, overview) with the friendliness of Zorin OS.
+**Terra** is a Wayland desktop for Arch Linux, written in Rust. **Meridian** is
+its compositor, built on [Smithay](https://github.com/Smithay/smithay). Around
+it are small separate programs for the bar, dock, launcher, notifications,
+desktop icons, settings and lock screen.
 
-**Status: phase 5 of 6.** The compositor runs nested in a window or as a real
-session from a TTY. It has rounded windows with shadows, four spaces, an
-overview, a top bar, an optional dock, the Find launcher and notifications.
-The settings app, lock screen and desktop icons are still to come. The
-real-session backend is new and has had little hardware testing.
+![Terra running nested](docs/design/terra-4-settings.png)
 
-![Meridian running nested](docs/design/phase-5-desktop.png)
+What it has:
 
-The look follows the "Terra" mockups in `docs/design/`.
+- three moods (Morning, Dusk, Night) that follow the time of day, with a
+  landscape wallpaper drawn in the mood's colors
+- rounded windows with shadows and title bars, floating or tiled, on four spaces
+- a top bar with space markers and a tray; a dock that can stay, auto-hide,
+  or step aside for Find
+- Find: one search field for apps, files, settings and actions
+- notifications, desktop icons, a lock screen and a Settings app
+
+**Status: early.** Everything above runs nested inside another desktop. The
+real-session backend (started from a text console or a login manager) has not
+been tested on hardware yet, and unlocking the lock screen with a real
+password has not been tested either. See "Known gaps" at the end.
+
+The design mockups are in `docs/design/`.
 
 ## Install (Arch Linux)
 
@@ -41,24 +51,47 @@ meridian-comp 2> ~/meridian.log
 or pick "Meridian" in your login manager. On a hybrid-graphics laptop you can
 choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 
-| Keys                 | Action                              |
-|----------------------|-------------------------------------|
-| Mod+Return           | open a terminal                     |
-| Mod+Q                | close the focused window            |
-| Super (tap) or Mod+Space | open or close Find              |
-| Mod+O                | overview: thumbnails and spaces     |
-| Mod+D                | keyboard to the dock (arrows, Enter, Esc) |
-| Mod+L                | lock the screen                     |
-| Mod+1 .. Mod+4       | switch space (add Shift: move window) |
-| Mod+T                | toggle floating / tiled             |
-| Mod+Tab              | focus next window (Shift: previous) |
-| Mod+left-drag        | move a window (or drag its title bar) |
-| Mod+right-drag       | resize a window (or drag its border) |
-| Print                | screenshot to ~/Pictures/Screenshots |
-| Mod+Shift+E          | quit                                |
-| Ctrl+Alt+F1..F12     | switch virtual terminal             |
+## Keys
 
 `Mod` is **Super** in a real session and **Alt** when nested.
+
+| Keys                     | Action                                        |
+|--------------------------|-----------------------------------------------|
+| Super (tap), Mod+Space   | Find: apps, files, settings, actions          |
+| Mod+Return               | open a terminal                               |
+| Mod+Q                    | close the focused window                      |
+| Mod+Tab, Mod+Shift+Tab   | focus the next / previous window              |
+| Mod+1 .. Mod+4           | go to a space                                 |
+| Mod+Shift+1 .. 4         | move the focused window to a space            |
+| Mod+O                    | overview: window thumbnails and spaces        |
+| Mod+T                    | switch between floating and tiled             |
+| Mod+D                    | keyboard to the dock (arrows, Enter, Esc)     |
+| Mod+L                    | lock the screen                               |
+| Mod+left-drag            | move a window (or drag its title bar)         |
+| Mod+right-drag           | resize a window (or drag its border)          |
+| Print                    | screenshot to `~/Pictures/Screenshots`        |
+| Mod+Shift+E              | quit Meridian                                 |
+| Ctrl+Alt+F1 .. F12       | switch virtual terminal (real session)        |
+
+In Find: Up and Down move the highlight, Enter opens it, Tab completes the
+field to it, Esc closes.
+
+To change keys, add a `[keybindings]` section to
+`~/.config/meridian/config.toml`. It replaces all defaults, so copy the
+section from `/usr/share/doc/meridian-git/config.toml` and edit it:
+
+```toml
+[keybindings]
+"Mod+Return" = "spawn-terminal"
+"Mod+B" = { spawn = "firefox" }
+"Mod+2" = { workspace = 2 }
+```
+
+Keys are modifiers (`Mod`, `Super`, `Alt`, `Ctrl`, `Shift`) and one XKB key
+name joined by `+`. Actions: `spawn-terminal`, `close-window`, `quit`,
+`toggle-layout`, `focus-next`, `focus-previous`, `screenshot`,
+`toggle-overview`, `focus-dock`, `lock`, `{ spawn = "command" }`,
+`{ workspace = N }`, `{ move-to-workspace = N }`.
 
 ## Find
 
@@ -126,7 +159,7 @@ position = "bottom"    # "bottom", "left" or "right"
 running-dots = true
 ```
 
-## Layout
+## Components
 
 | Crate             | Purpose                                              |
 |-------------------|------------------------------------------------------|
@@ -149,6 +182,18 @@ notification daemon can run per login session, so inside GNOME or KDE (nested
 mode) `meridian-notify` exits and the host desktop keeps showing them.
 
 Building needs `gtk4` and `gtk4-layer-shell` installed (`makepkg -s` does that).
+
+## Known gaps
+
+- The real-session backend drives one GPU. On a hybrid laptop, monitors wired
+  to the second GPU stay dark. It has not been run on hardware yet.
+- Unlocking the lock screen with a real password has not been tested.
+- No XWayland: X11-only apps do not open.
+- Integer output scale only (1, 2, 3).
+- The app menu in the bar is a stub; Displays, Network, Sound and Users in
+  Settings are placeholders.
+- No animations except the auto-hide dock; no idle timer that locks the screen.
+- Popups do not close when you click outside them.
 
 ## License
 
