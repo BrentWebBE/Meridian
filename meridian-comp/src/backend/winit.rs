@@ -3,7 +3,6 @@
 
 
 use anyhow::Context;
-use meridian_common::theme;
 use smithay::{
     backend::{
         renderer::{damage::OutputDamageTracker, gles::GlesRenderer},
@@ -63,7 +62,6 @@ pub fn attach(
 
     // Remembers what was drawn last frame so unchanged regions can be skipped.
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
-    let background = theme::LIGHT.wallpaper.sky.to_array();
 
     // `move` transfers ownership of `output` and `damage_tracker` into the
     // closure, which then lives inside the event loop for the program's lifetime.
@@ -85,6 +83,7 @@ pub fn attach(
                 let overview = state.overview_scene();
                 let Backend::Winit(winit) = &mut state.backend else { return };
                 let size = winit.graphics.window_size();
+                let background = state.effects.theme().sky.to_array();
 
                 let rendered = match winit.graphics.bind() {
                     Ok((renderer, mut framebuffer)) => {

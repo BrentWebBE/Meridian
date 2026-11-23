@@ -1,0 +1,37 @@
+# Terra's three moods. Colors are #rrggbb.
+#
+# To change a color, copy this file to ~/.config/meridian/themes.toml and
+# edit it; you only need to keep the sections and keys you change.
+
+[morning]
+sky = "#ece8dc"
+sun = "#f4d9a8"
+hills = ["#cfd8bb", "#b0c09b", "#8fa683"]   # far, middle, near
+surface = "#fbf9f3"
+surface2 = "#efebe0"
+ink = "#26302a"
+muted = "#5e6a60"
+accent = "#b85a32"
+on-accent = "#ffffff"
+
+[dusk]
+sky = "#d8b7a4"
+sun = "#f2c48a"
+hills = ["#9a7283", "#6f5570", "#4a3b57"]
+surface = "#2d2535"
+surface2 = "#3a3044"
+ink = "#f3e9e2"
+muted = "#c3b3c0"
+accent = "#e8a15c"
+on-accent = "#2d2535"
+
+[night]
+sky = "#141c1b"
+sun = "#dfe6d0"
+hills = ["#1d2b27", "#253630", "#2d4339"]
+surface = "#1c2623"
+surface2 = "#26332e"
+ink = "#e4ebe3"
+muted = "#9fb0a6"
+accent = "#d9a566"
+on-accent = "#1c2623"

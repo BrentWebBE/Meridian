@@ -11,3 +11,10 @@ repository.workspace = true
 serde.workspace = true
 toml.workspace = true
 serde_json.workspace = true
+toml_edit.workspace = true
+# Only for the GTK programs, see src/shell.rs.
+gtk = { workspace = true, optional = true }
+glib-unix = { workspace = true, optional = true }
+
+[features]
+gtk = ["dep:gtk", "dep:glib-unix"]

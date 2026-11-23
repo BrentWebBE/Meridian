@@ -14,6 +14,14 @@ terminal = ""
 # Programs started together with Meridian. Set to [] for a bare compositor.
 autostart = ["meridian-bar", "meridian-dock", "meridian-notify", "meridian-launcher --background"]
 
+[appearance]
+# "morning", "dusk" or "night". Ignored while follow-time-of-day is on.
+theme = "morning"
+# Morning from 6:00, dusk from 17:00, night from 21:00.
+follow-time-of-day = true
+# An image (PNG or JPEG) to use instead of the drawn landscape. Empty = none.
+wallpaper = ""
+
 [keyboard]
 # XKB names, e.g. layout = "us", "be", "de". Empty = system default.
 layout = ""
@@ -32,8 +40,11 @@ gap = 12              # pixels between tiled windows
 master-ratio = 0.55   # share of the width for the first window
 
 [dock]
-# "dock" = always visible at the bottom, "off" = no dock (use Find instead).
+# "dock" = always visible, "auto-hide" = appears at the screen edge,
+# "off" = no dock (use Find instead).
 mode = "dock"
+position = "bottom"       # "bottom", "left" or "right"
+running-dots = true       # a dot under apps that are running
 # Apps always shown in the dock, by desktop file id (the file name in
 # /usr/share/applications without ".desktop"). Missing apps are skipped.
 pinned = [
@@ -42,7 +53,7 @@ pinned = [
     "Alacritty",
     "foot",
     "org.gnome.TextEditor",
-    "org.gnome.Settings",
+    "org.meridian.Settings",
 ]
 
 # Keys are written as modifiers and one key joined by "+".

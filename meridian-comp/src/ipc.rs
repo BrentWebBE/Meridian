@@ -105,6 +105,7 @@ impl Meridian {
                 }
             }
             Request::Action(action) => self.run_action(action),
+            Request::ReloadConfig => self.reload_config(),
         }
     }
 
@@ -143,6 +144,8 @@ impl Meridian {
             active_space: self.active_space as u32,
             space_count: crate::overview::SPACE_COUNT as u32,
             overview: self.overview,
+            theme: self.effects.theme().mood.name().to_string(),
+            config_generation: self.config_generation,
         }
     }
 

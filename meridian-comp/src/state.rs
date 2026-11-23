@@ -3,7 +3,10 @@
 use std::{ffi::OsString, path::PathBuf, process::Command, sync::Arc, time::Duration, time::Instant};
 
 use anyhow::Context;
-use meridian_common::config::{Action, Config, LayoutKind};
+use meridian_common::{
+    config::{Action, Config, LayoutKind},
+    theme::Themes,
+};
 use smithay::{
     backend::{
         egl::EGLDevice,
@@ -20,7 +23,11 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        calloop::{EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, generic::Generic},
+        calloop::{
+            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+            channel::{Event as ChannelEvent, Sender, channel},
+            generic::Generic,
+        },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             Display, DisplayHandle,
@@ -78,6 +85,10 @@ pub struct Meridian {
     pub layout: Box<dyn Layout>,
     pub popups: PopupManager,
 
+    /// The three moods' colors, from the themes file.
+    pub themes: Themes,
+    /// Sends decoded wallpaper images from the worker thread to the main loop.
+    pub wallpaper_sender: Option<Sender<WallpaperImage>>,
     /// Compiled shaders for rounded corners and shadows (effects.rs).
     pub effects: Effects,
     /// Index of the space (virtual desktop) being shown, see overview.rs.
@@ -101,6 +112,8 @@ pub struct Meridian {
     /// Connections from shell programs (bar, dock), see ipc.rs.
     pub ipc: IpcServer,
     pub next_window_id: u32,
+    /// Counts config reloads; shell programs re-read the file when it changes.
+    pub config_generation: u32,
     /// Path of the IPC socket, passed to programs we start.
     pub ipc_socket: Option<PathBuf>,
 
@@ -164,7 +177,9 @@ impl Meridian {
             .context("failed to set up the keyboard: check [keyboard] in your config")?;
         seat.add_pointer();
 
-        let effects = Effects::compile(backend.renderer())?;
+        let themes = Themes::load();
+        let mood = config.appearance.current_mood(current_hour());
+        let effects = Effects::compile(backend.renderer(), themes.get(mood))?;
         let socket_name = init_wayland_socket(display, event_loop)?;
         let bindings = keys::parse_bindings(&config.keybindings, backend.mod_is_logo());
         let layout = layout::from_kind(config.layout, &config);
@@ -182,6 +197,8 @@ impl Meridian {
             windows: Vec::new(),
             layout,
             popups: PopupManager::default(),
+            themes,
+            wallpaper_sender: None,
             effects,
             active_space: 0,
             overview: false,
@@ -193,6 +210,7 @@ impl Meridian {
             ipc: IpcServer::default(),
             next_window_id: 1,
             ipc_socket: None,
+            config_generation: 0,
             suppressed_keys: Vec::new(),
             compositor_state,
             xdg_shell_state,
@@ -405,6 +423,110 @@ impl Meridian {
         self.ipc_broadcast();
     }
 
+    // ---- configuration ----------------------------------------------------
+
+    /// Read the config file again and apply what can change while running:
+    /// theme, layout, keybindings, and whatever the shell programs read.
+    /// (Keyboard layout and output scale need a restart.)
+    pub fn reload_config(&mut self) {
+        let config = match Config::load() {
+            Ok(config) => config,
+            Err(err) => {
+                // Keep running with the old settings rather than half-apply a broken file.
+                tracing::error!("{err}\nkeeping the current configuration");
+                return;
+            }
+        };
+
+        self.bindings = keys::parse_bindings(&config.keybindings, self.backend.mod_is_logo());
+        let layout_changed = config.layout != self.layout.kind();
+        let new_layout = config.layout;
+        self.config = config;
+        self.themes = Themes::load();
+        self.config_generation += 1;
+        self.load_wallpaper();
+
+        self.update_theme();
+        if layout_changed {
+            self.set_layout(new_layout); // also broadcasts
+        }
+        self.ipc_broadcast();
+        tracing::info!("configuration reloaded");
+    }
+
+    /// Apply the mood for the current settings and time of day.
+    pub fn update_theme(&mut self) {
+        let mood = self.config.appearance.current_mood(current_hour());
+        let theme = self.themes.get(mood);
+        // Also true when only colors changed (an edited themes file).
+        if theme != self.effects.theme() {
+            tracing::info!("mood: {}", mood.name());
+            self.effects.set_theme(theme);
+            self.ipc_broadcast();
+        }
+    }
+
+    /// Set up the channel that brings decoded wallpaper images to the main loop.
+    pub fn init_wallpaper(&mut self) {
+        // A calloop channel is an event source: sending from another thread
+        // wakes the event loop and runs this callback on the main thread.
+        let (sender, receiver) = channel::<WallpaperImage>();
+        let inserted = self.loop_handle.insert_source(receiver, |event, _, state| {
+            if let ChannelEvent::Msg(image) = event {
+                state
+                    .effects
+                    .set_wallpaper_image(state.backend.renderer(), &image.pixels, image.width, image.height);
+            }
+        });
+        if inserted.is_ok() {
+            self.wallpaper_sender = Some(sender);
+            self.load_wallpaper();
+        }
+    }
+
+    /// Start loading the wallpaper image named in the config, if any.
+    /// Decoding a large photo takes a while, so it happens on a worker
+    /// thread; the main loop must never wait for the disk.
+    pub fn load_wallpaper(&mut self) {
+        let path = self.config.appearance.wallpaper.trim().to_string();
+        if path.is_empty() {
+            self.effects.clear_wallpaper_image();
+            return;
+        }
+        let Some(sender) = self.wallpaper_sender.clone() else { return };
+        // "~/Pictures/x.jpg" is a shell convention; expand it ourselves.
+        let path = match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+            (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
+            _ => PathBuf::from(path),
+        };
+
+        std::thread::spawn(move || match image::open(&path) {
+            Ok(image) => {
+                let image = image.to_rgba8();
+                let (width, height) = image.dimensions();
+                let _ = sender.send(WallpaperImage {
+                    pixels: image.into_raw(),
+                    width,
+                    height,
+                });
+            }
+            Err(err) => tracing::error!("wallpaper {}: {err}", path.display()),
+        });
+    }
+
+    /// Check once a minute whether the time of day calls for another theme.
+    pub fn start_theme_clock(&self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let timer = Timer::from_duration(Duration::from_secs(60));
+        let started = self.loop_handle.insert_source(timer, |_, _, state| {
+            state.update_theme();
+            TimeoutAction::ToDuration(Duration::from_secs(60)) // fire again
+        });
+        if started.is_err() {
+            tracing::warn!("could not start the theme clock");
+        }
+    }
+
     // ---- actions ----------------------------------------------------------
 
     /// Run an action from a keybinding.
@@ -535,6 +657,19 @@ impl Meridian {
         self.popups.cleanup();
         let _ = self.display_handle.flush_clients();
     }
+}
+
+/// A decoded wallpaper: RGBA pixels, 4 bytes each.
+pub struct WallpaperImage {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The hour of the day (0-23) in local time.
+fn current_hour() -> u32 {
+    use chrono::Timelike;
+    chrono::Local::now().hour()
 }
 
 /// The four xdg_toplevel "tiled" edge states.

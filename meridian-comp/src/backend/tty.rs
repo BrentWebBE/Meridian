@@ -16,7 +16,6 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use anyhow::Context;
-use meridian_common::theme;
 use smithay::{
     backend::{
         allocator::{
@@ -402,7 +401,7 @@ impl Meridian {
     /// Draw one monitor, if it is ready for a new frame.
     fn tty_render(&mut self, crtc: crtc::Handle) {
         let pointer_location = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
-        let background = theme::LIGHT.wallpaper.sky.to_array();
+        let background = self.effects.theme().sky.to_array();
         let focused = self.focused_window();
         let overview = self.overview_scene();
 

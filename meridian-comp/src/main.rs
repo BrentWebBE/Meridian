@@ -115,6 +115,8 @@ fn main() -> anyhow::Result<()> {
         Ok(path) => state.ipc_socket = Some(path),
         Err(err) => tracing::error!("IPC is unavailable, bar and dock will be limited: {err:#}"),
     }
+    state.start_theme_clock();
+    state.init_wallpaper();
     state.autostart();
 
     if let Some((program, rest)) = args.split_first() {
