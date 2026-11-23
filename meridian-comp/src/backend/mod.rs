@@ -13,8 +13,9 @@ use smithay::{
             memory::MemoryRenderBufferRenderElement,
             render_elements,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            texture::TextureRenderElement,
         },
-        gles::{GlesRenderer, element::PixelShaderElement},
+        gles::{GlesRenderer, GlesTexture, element::PixelShaderElement},
     },
     desktop::{PopupManager, Space, Window, layer_map_for_output},
     input::pointer::{CursorImageStatus, CursorImageSurfaceData},
@@ -74,6 +75,8 @@ render_elements! {
     Rounded=RoundedTextureElement,
     // Shadows and other shader-drawn shapes.
     Shader=PixelShaderElement,
+    // A plain image: the user's wallpaper.
+    Texture=TextureRenderElement<GlesTexture>,
 }
 
 /// What to draw for the pointer, and where.
@@ -162,7 +165,11 @@ pub fn output_elements(renderer: &mut GlesRenderer, output: &Output, scene: &Sce
 
     // 4. Desktop layers from clients, then our own wallpaper at the very bottom.
     layer_elements(renderer, output, scale, &[Layer::Bottom, Layer::Background], &mut elements);
-    elements.push(OutputElement::Shader(scene.effects.wallpaper(output, output_geo.size)));
+    // The user's image if there is one, otherwise the drawn landscape.
+    match scene.effects.wallpaper_image(output_geo.size) {
+        Some(image) => elements.push(OutputElement::Texture(image)),
+        None => elements.push(OutputElement::Shader(scene.effects.wallpaper(output, output_geo.size))),
+    }
 
     elements
 }
@@ -259,7 +266,7 @@ fn overview_elements(
     elements: &mut Vec<OutputElement>,
 ) {
     let effects = scene.effects;
-    let theme = meridian_common::theme::LIGHT;
+    let theme = effects.theme();
     // Overview rectangles are in global coordinates; make them output-local.
     let local = |rect: Rect| Rect::new(rect.loc - output_geo.loc, rect.size);
 
@@ -292,11 +299,11 @@ fn overview_elements(
         elements.push(OutputElement::Shader(effects.rounded_rect(
             rect,
             8.0,
-            theme.wallpaper.sky.to_array(),
+            theme.sky.to_array(),
         )));
         // A ring around the tile: accent color for the active space.
         let ring = Rect::new((rect.loc.x - 2, rect.loc.y - 2).into(), (rect.size.w + 4, rect.size.h + 4).into());
-        let ring_color = if tile.active { theme.accent } else { theme.surface_raised };
+        let ring_color = if tile.active { theme.accent } else { theme.surface };
         elements.push(OutputElement::Shader(effects.rounded_rect(ring, 10.0, ring_color.to_array())));
     }
 
@@ -308,7 +315,8 @@ fn overview_elements(
     }
 
     // Dim the desktop behind everything.
-    let dim = theme.text.with_alpha(0.28).to_array();
+    // Always dark, also in the dark moods where the ink color is light.
+    let dim = [0.06, 0.07, 0.066, 0.34];
     elements.push(OutputElement::Shader(effects.rounded_rect(
         Rect::new((0, 0).into(), output_geo.size),
         0.0,
@@ -335,7 +343,7 @@ pub fn screenshot(
     let mode = output.current_mode().context("output has no mode")?;
     let (width, height) = (mode.size.w, mode.size.h);
     let scale = output.current_scale().fractional_scale();
-    let background = meridian_common::theme::LIGHT.wallpaper.sky.to_array();
+    let background = scene.effects.theme().sky.to_array();
 
     let elements = output_elements(renderer, output, scene);
 

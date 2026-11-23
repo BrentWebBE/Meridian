@@ -22,7 +22,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use meridian_common::{
     config::{Action, Config},
     ipc::{Connection, Request, State},
-    theme,
+    shell,
 };
 
 use crate::apps::AppEntry;
@@ -485,6 +485,7 @@ fn watch_compositor(app: &gtk::Application, ui: Rc<Ui>) {
         match received {
             Ok(states) => {
                 if let Some(state) = states.last() {
+                    shell::apply_mood(&state.theme);
                     ui.show_running(state);
                     ui.follow_overview(state.overview);
                 }
@@ -507,12 +508,8 @@ fn send(request: &Request) {
 }
 
 fn load_css() {
-    let css = format!("{}\n{}", theme::LIGHT.css_variables(), include_str!("style.css"));
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css);
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    // Theme variables plus our stylesheet; re-themed when the mood changes.
+    shell::install_css(include_str!("style.css"));
 }
 
 fn divider() -> gtk::Box {

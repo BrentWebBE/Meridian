@@ -8,7 +8,7 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="A Wayland desktop environment written in Rust (early development)"
 arch=('x86_64' 'aarch64')
@@ -48,6 +48,8 @@ package() {
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   # Example configuration (the same file the built-in defaults come from).
   install -Dm644 meridian-common/resources/default-config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
+  # The three moods' colors, as a template for ~/.config/meridian/themes.toml.
+  install -Dm644 meridian-common/resources/themes.toml "$pkgdir/usr/share/doc/$pkgname/themes.toml"
   # Makes "Meridian" selectable in login managers such as GDM and SDDM.
   install -Dm644 packaging/session/meridian.desktop "$pkgdir/usr/share/wayland-sessions/meridian.desktop"
 }

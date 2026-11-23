@@ -17,11 +17,11 @@ mod server;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use gtk::{gdk, glib, prelude::*};
+use gtk::{glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
     ipc::{Connection, State},
-    theme,
+    shell,
 };
 
 use crate::server::{CloseReason, Event, Notification};
@@ -83,9 +83,15 @@ fn quit_with_compositor(app: &gtk::Application) {
     let connection = RefCell::new(connection);
     let app = app.clone();
     glib_unix::unix_fd_add_local(fd, glib::IOCondition::IN | glib::IOCondition::HUP, move |_, _| {
-        // We ignore the window updates; only a closed socket matters.
-        match connection.borrow_mut().receive::<State>() {
-            Ok(_) => glib::ControlFlow::Continue,
+        // Of the updates we only use the mood; a closed socket means quit.
+        let received = connection.borrow_mut().receive::<State>();
+        match received {
+            Ok(states) => {
+                if let Some(state) = states.last() {
+                    shell::apply_mood(&state.theme);
+                }
+                glib::ControlFlow::Continue
+            }
             Err(_) => {
                 app.quit();
                 glib::ControlFlow::Break
@@ -253,10 +259,6 @@ fn text_label(text: &str, class: &str) -> gtk::Label {
 }
 
 fn load_css() {
-    let css = format!("{}\n{}", theme::LIGHT.css_variables(), include_str!("style.css"));
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css);
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    // Theme variables plus our stylesheet; re-themed when the mood changes.
+    shell::install_css(include_str!("style.css"));
 }

@@ -10,19 +10,21 @@
 //! Shadows need no texture at all: a second shader computes, for every pixel
 //! around the window, how far it is from the window's edge and fades with it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+
+use meridian_common::theme::{Mood, Theme};
 
 use anyhow::Context;
 use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            Bind, Offscreen,
+            Bind, ImportMem, Offscreen,
             damage::OutputDamageTracker,
             element::{
                 Element, Id, Kind, RenderElement,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
-                texture::{TextureRenderBuffer, TextureRenderElement},
+                texture::{TextureBuffer, TextureRenderBuffer, TextureRenderElement},
             },
             gles::{
                 GlesError, GlesFrame, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
@@ -171,10 +173,23 @@ pub struct Effects {
     rounded_texture: GlesTexProgram,
     soft_box: GlesPixelProgram,
     wallpaper: GlesPixelProgram,
+    /// The colors in use. `Cell` lets `set_theme` work through `&self`.
+    theme: Cell<Theme>,
+    /// The user's wallpaper image, if one is set and has been loaded.
+    wallpaper_image: RefCell<Option<WallpaperTexture>>,
 }
 
 impl Effects {
-    pub fn compile(renderer: &mut GlesRenderer) -> anyhow::Result<Self> {
+    pub fn theme(&self) -> Theme {
+        self.theme.get()
+    }
+
+    /// Switch colors. Cached elements notice on their next use.
+    pub fn set_theme(&self, theme: Theme) {
+        self.theme.set(theme);
+    }
+
+    pub fn compile(renderer: &mut GlesRenderer, theme: Theme) -> anyhow::Result<Self> {
         let rounded_texture = renderer
             .compile_custom_texture_shader(
                 ROUNDED_TEXTURE.replace("ROUNDED_BOX", ROUNDED_BOX),
@@ -217,7 +232,52 @@ impl Effects {
             rounded_texture,
             soft_box,
             wallpaper,
+            theme: Cell::new(theme),
+            wallpaper_image: RefCell::new(None),
         })
+    }
+
+    /// Use an image as wallpaper. `pixels` is RGBA, 4 bytes per pixel.
+    pub fn set_wallpaper_image(&self, renderer: &mut GlesRenderer, pixels: &[u8], width: u32, height: u32) {
+        let size: Size<i32, Buffer> = (width as i32, height as i32).into();
+        match renderer.import_memory(pixels, Fourcc::Abgr8888, size, false) {
+            Ok(texture) => {
+                let buffer = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+                *self.wallpaper_image.borrow_mut() = Some((buffer, size));
+            }
+            Err(err) => tracing::warn!("could not upload the wallpaper image: {err}"),
+        }
+    }
+
+    /// Go back to the drawn landscape.
+    pub fn clear_wallpaper_image(&self) {
+        *self.wallpaper_image.borrow_mut() = None;
+    }
+
+    /// The wallpaper image scaled to cover an output of the given size,
+    /// cropping whatever does not fit. `None` if no image is set.
+    pub fn wallpaper_image(&self, size: Size<i32, Logical>) -> Option<TextureRenderElement<GlesTexture>> {
+        let image = self.wallpaper_image.borrow();
+        let (buffer, image_size) = image.as_ref()?;
+        let (iw, ih) = (image_size.w as f64, image_size.h as f64);
+        let (ow, oh) = (size.w.max(1) as f64, size.h.max(1) as f64);
+
+        // The largest centered part of the image with the screen's proportions.
+        let (crop_w, crop_h) = if iw / ih > ow / oh {
+            (ih * ow / oh, ih) // image is wider: cut the sides
+        } else {
+            (iw, iw * oh / ow) // image is taller: cut top and bottom
+        };
+        let src = Rectangle::new(((iw - crop_w) / 2.0, (ih - crop_h) / 2.0).into(), (crop_w, crop_h).into());
+
+        Some(TextureRenderElement::from_texture_buffer(
+            (0.0, 0.0),
+            buffer,
+            None,
+            Some(src),
+            Some(size),
+            Kind::Unspecified,
+        ))
     }
 
     /// The wallpaper for an output of the given size. Kept in the output's
@@ -227,13 +287,14 @@ impl Effects {
             .user_data()
             .get_or_insert(|| WallpaperCache(RefCell::new(None)));
         let mut cached = cache.0.borrow_mut();
-        if let Some((element, cached_size)) = cached.as_ref()
+        let theme = self.theme.get();
+        if let Some((element, cached_size, cached_theme)) = cached.as_ref()
             && *cached_size == size
+            && *cached_theme == theme.mood
         {
             return element.clone();
         }
 
-        let colors = meridian_common::theme::LIGHT.wallpaper;
         let rgb = |color: meridian_common::theme::Color| (color.r, color.g, color.b);
         let element = PixelShaderElement::new(
             self.wallpaper.clone(),
@@ -242,15 +303,15 @@ impl Effects {
             1.0,
             vec![
                 Uniform::new("area_size", (size.w as f32, size.h as f32)),
-                Uniform::new("sky", rgb(colors.sky)),
-                Uniform::new("sun", rgb(colors.sun)),
-                Uniform::new("hill_far", rgb(colors.hill_far)),
-                Uniform::new("hill_mid", rgb(colors.hill_mid)),
-                Uniform::new("hill_near", rgb(colors.hill_near)),
+                Uniform::new("sky", rgb(theme.sky)),
+                Uniform::new("sun", rgb(theme.sun)),
+                Uniform::new("hill_far", rgb(theme.hills[0])),
+                Uniform::new("hill_mid", rgb(theme.hills[1])),
+                Uniform::new("hill_near", rgb(theme.hills[2])),
             ],
             Kind::Unspecified,
         );
-        *cached = Some((element.clone(), size));
+        *cached = Some((element.clone(), size, theme.mood));
         element
     }
 
@@ -273,7 +334,7 @@ impl Effects {
             shadow_area(rect),
             None,
             1.0,
-            shadow_uniforms(rect, radius, strength),
+            shadow_uniforms(rect, radius, strength, self.theme.get()),
             Kind::Unspecified,
         )
     }
@@ -287,29 +348,30 @@ impl Effects {
             .user_data()
             .get_or_insert(|| BackdropCache(RefCell::new(None)));
         let mut cached = cache.0.borrow_mut();
+        let theme = self.theme.get();
 
         let up_to_date = cached
             .as_ref()
-            .is_some_and(|backdrop| backdrop.rect == rect && backdrop.focused == focused);
+            .is_some_and(|backdrop| backdrop.rect == rect && backdrop.focused == focused && backdrop.theme == theme.mood);
         if !up_to_date {
             let strength = if focused { Shadow::Focused } else { Shadow::Normal };
             // The outline is a slightly larger rounded rectangle peeking out
             // from behind the window.
             let outline = Rect::new((rect.loc.x - 1, rect.loc.y - 1).into(), (rect.size.w + 2, rect.size.h + 2).into());
-            let theme = meridian_common::theme::LIGHT;
-            let outline_color = if focused { theme.accent.with_alpha(0.75) } else { theme.border };
+            let outline_color = if focused { theme.accent.with_alpha(0.5) } else { theme.border() };
 
             match cached.as_mut() {
                 // Reuse the existing elements (and their ids), only moving them.
                 Some(backdrop) => {
                     backdrop.shadow.resize(shadow_area(rect), None);
-                    backdrop.shadow.update_uniforms(shadow_uniforms(rect, RADIUS, strength));
+                    backdrop.shadow.update_uniforms(shadow_uniforms(rect, RADIUS, strength, theme));
                     backdrop.outline.resize(outline, None);
                     backdrop
                         .outline
                         .update_uniforms(rounded_rect_uniforms(outline, RADIUS + 1.0, outline_color.to_array()));
                     backdrop.rect = rect;
                     backdrop.focused = focused;
+                    backdrop.theme = theme.mood;
                 }
                 None => {
                     *cached = Some(Backdrop {
@@ -317,6 +379,7 @@ impl Effects {
                         outline: self.rounded_rect(outline, RADIUS + 1.0, outline_color.to_array()),
                         rect,
                         focused,
+                        theme: theme.mood,
                     });
                 }
             }
@@ -380,10 +443,15 @@ struct Backdrop {
     outline: PixelShaderElement,
     rect: Rect,
     focused: bool,
+    theme: Mood,
 }
 
 struct BackdropCache(RefCell<Option<Backdrop>>);
-struct WallpaperCache(RefCell<Option<(PixelShaderElement, Size<i32, Logical>)>>);
+/// The uploaded wallpaper image and its size in pixels.
+type WallpaperTexture = (TextureBuffer<GlesTexture>, Size<i32, Buffer>);
+/// The drawn landscape, with the output size and mood it was made for.
+type DrawnWallpaper = (PixelShaderElement, Size<i32, Logical>, Mood);
+struct WallpaperCache(RefCell<Option<DrawnWallpaper>>);
 
 fn rounded_rect_uniforms(rect: Rect, radius: f32, color: [f32; 4]) -> Vec<Uniform<'static>> {
     let size = (rect.size.w as f32, rect.size.h as f32);
@@ -404,8 +472,8 @@ fn shadow_area(rect: Rect) -> Rect {
     )
 }
 
-fn shadow_uniforms(rect: Rect, radius: f32, strength: Shadow) -> Vec<Uniform<'static>> {
-    let shadow = meridian_common::theme::LIGHT.shadow;
+fn shadow_uniforms(rect: Rect, radius: f32, strength: Shadow, theme: Theme) -> Vec<Uniform<'static>> {
+    let shadow = theme.shadow();
     // (blur width, how far the shadow drops below the window, opacity factor)
     let (softness, drop, opacity) = match strength {
         Shadow::Normal => (22.0f32, 4.0f32, 1.0f32),

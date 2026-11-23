@@ -62,9 +62,28 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 
 Copy `/usr/share/doc/meridian-git/config.toml` (or
 `meridian-common/resources/default-config.toml`) to
-`~/.config/meridian/config.toml`. It covers the start layout, terminal,
-autostart programs, keyboard layout, output scale, tiling gaps, pinned dock
-apps and keybindings. Restart Meridian to apply changes.
+`~/.config/meridian/config.toml`. It covers the mood, wallpaper, start layout,
+terminal, autostart programs, keyboard layout, output scale, tiling gaps,
+pinned dock apps and keybindings.
+
+### Moods
+
+Terra has three moods: Morning, Dusk and Night. By default the mood follows
+the clock (morning from 6:00, dusk from 17:00, night from 21:00). To pin one:
+
+```toml
+[appearance]
+theme = "dusk"
+follow-time-of-day = false
+wallpaper = "~/Pictures/photo.jpg"   # optional; empty = the drawn landscape
+```
+
+To change colors, copy `/usr/share/doc/meridian-git/themes.toml` to
+`~/.config/meridian/themes.toml` and edit the tokens you want.
+
+Apply changes without restarting: the Settings app will do this for you; until
+it exists, send `"reload-config"` to the socket in `$MERIDIAN_SOCKET`.
+Keyboard layout and output scale still need a restart.
 
 ## Layout
 

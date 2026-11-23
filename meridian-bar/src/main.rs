@@ -7,12 +7,12 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
     config::Action,
     ipc::{Connection, Request, State},
-    theme,
+    shell, theme,
 };
 
 fn main() -> glib::ExitCode {
@@ -46,7 +46,8 @@ fn build_ui(app: &gtk::Application) {
     // ---- left: menu button and focused app --------------------------------
     // The round logo button opens Find.
     let menu_button = gtk::Button::builder()
-        .label("M")
+        // The first letter of the product name.
+        .label(&theme::BRAND[..1])
         .css_classes(["menu"])
         .valign(gtk::Align::Center)
         .tooltip_text("Find apps and files")
@@ -121,12 +122,8 @@ fn build_ui(app: &gtk::Application) {
 
 /// Theme tokens first, then our own stylesheet that refers to them.
 fn load_css() {
-    let css = format!("{}\n{}", theme::LIGHT.css_variables(), include_str!("style.css"));
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css);
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    // Theme variables plus our stylesheet; re-themed when the mood changes.
+    shell::install_css(include_str!("style.css"));
 }
 
 fn update_clock(label: &gtk::Label) {
@@ -228,6 +225,7 @@ fn watch_compositor(app_name: gtk::Label, spaces: gtk::Box) {
             Ok(states) => {
                 // Only the newest snapshot matters.
                 if let Some(state) = states.last() {
+                    shell::apply_mood(&state.theme);
                     app_name.set_label(&focused_app_name(state));
                     show_spaces(&spaces, state);
                 }

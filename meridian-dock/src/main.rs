@@ -4,11 +4,12 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
     config::{Config, DockMode},
     ipc::{Connection, Request, State},
+    shell,
     theme,
 };
 
@@ -97,6 +98,8 @@ fn build_ui(app: &gtk::Application) {
         active_space: 0,
         space_count: 1,
         overview: false,
+        theme: String::new(),
+        config_generation: 0,
     };
     dock.rebuild(&empty);
 
@@ -108,6 +111,7 @@ fn build_ui(app: &gtk::Application) {
             match received {
                 Ok(states) => {
                     if let Some(state) = states.last() {
+                        shell::apply_mood(&state.theme);
                         dock.rebuild(state);
                     }
                     glib::ControlFlow::Continue
@@ -121,12 +125,8 @@ fn build_ui(app: &gtk::Application) {
 }
 
 fn load_css() {
-    let css = format!("{}\n{}", theme::LIGHT.css_variables(), include_str!("style.css"));
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css);
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    // Theme variables plus our stylesheet; re-themed when the mood changes.
+    shell::install_css(include_str!("style.css"));
 }
 
 impl Dock {

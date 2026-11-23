@@ -6,7 +6,8 @@ window.launcher-window {
 
 /* The see-through area around the panel; dims the desktop in Find mode. */
 .backdrop.dim {
-  background: color-mix(in srgb, var(--m-text) 22%, transparent);
+  /* Always dark, also in the dark moods where the text color is light. */
+  background: rgba(16, 18, 17, 0.34);
 }
 
 .panel {

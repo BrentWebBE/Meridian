@@ -49,6 +49,11 @@ pub struct State {
     pub space_count: u32,
     /// True while the overview is open.
     pub overview: bool,
+    /// Name of the theme in use: "morning", "dusk" or "night".
+    pub theme: String,
+    /// Goes up every time the compositor re-reads the config file, so
+    /// shell programs know to re-read it too.
+    pub config_generation: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +62,8 @@ pub enum Request {
     FocusWindow { id: u32 },
     /// Run any keybinding action, e.g. `"toggle-layout"`.
     Action(Action),
+    /// The config file changed: read it again and apply it.
+    ReloadConfig,
 }
 
 /// Where the compositor for Wayland display `wayland_display` listens.
