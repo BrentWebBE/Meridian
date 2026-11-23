@@ -8,9 +8,9 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.11.0
+pkgver=0.12.0
 pkgrel=1
-pkgdesc="A Wayland desktop environment written in Rust (early development)"
+pkgdesc="The Terra desktop: a Wayland compositor, bar, dock, launcher, settings and lock screen in Rust"
 arch=('x86_64' 'aarch64')
 url="https://github.com/BrentWebBE/Meridian"
 license=('MIT')
@@ -18,6 +18,8 @@ depends=('cairo' 'dbus' 'gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'li
          'libxkbcommon' 'mesa' 'pam' 'pango' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
 makedepends=('cargo' 'git')
 optdepends=('foot: terminal opened by the default Mod+Return binding'
+            'nautilus: file manager opened by the desktop icons'
+            'xdg-desktop-portal-gtk: file dialogs and other portals for apps'
             'wireplumber: volume icon in the bar (wpctl)'
             'libnotify: notify-send, for testing notifications'
             'alacritty: alternative terminal')
