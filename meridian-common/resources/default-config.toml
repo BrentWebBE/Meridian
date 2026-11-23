@@ -12,7 +12,13 @@ layout = "floating"
 terminal = ""
 
 # Programs started together with Meridian. Set to [] for a bare compositor.
-autostart = ["meridian-bar", "meridian-dock", "meridian-notify", "meridian-launcher --background"]
+autostart = [
+    "meridian-bar",
+    "meridian-dock",
+    "meridian-desktop",
+    "meridian-notify",
+    "meridian-launcher --background",
+]
 
 [appearance]
 # "morning", "dusk" or "night". Ignored while follow-time-of-day is on.
@@ -38,6 +44,10 @@ scale = 0
 [tiled]
 gap = 12              # pixels between tiled windows
 master-ratio = 0.55   # share of the width for the first window
+
+[desktop]
+# Home, Documents, Projects and Trash in the top-left corner.
+icons = true
 
 [dock]
 # "dock" = always visible, "auto-hide" = appears at the screen edge,

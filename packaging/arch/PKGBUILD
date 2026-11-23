@@ -8,7 +8,7 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.9.0
+pkgver=0.10.0
 pkgrel=1
 pkgdesc="A Wayland desktop environment written in Rust (early development)"
 arch=('x86_64' 'aarch64')
@@ -42,7 +42,8 @@ check() {
 
 package() {
   cd "$_repo"
-  for bin in meridian-comp meridian-bar meridian-dock meridian-launcher meridian-notify meridian-settings; do
+  for bin in meridian-comp meridian-bar meridian-dock meridian-launcher meridian-notify meridian-settings \
+             meridian-desktop; do
     install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

@@ -23,6 +23,7 @@ pub struct Config {
     pub output: Output,
     pub tiled: Tiled,
     pub dock: Dock,
+    pub desktop: Desktop,
     /// Key combination (e.g. "Mod+Return") to action.
     pub keybindings: HashMap<String, Action>,
 }
@@ -89,6 +90,13 @@ pub struct Dock {
     pub running_dots: bool,
     /// Desktop file ids without ".desktop", e.g. "org.gnome.Nautilus".
     pub pinned: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Desktop {
+    /// Show Home, Documents, Projects and Trash on the desktop.
+    pub icons: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
