@@ -12,3 +12,5 @@ meridian-common = { workspace = true, features = ["gtk"] }
 gtk.workspace = true
 gtk4-layer-shell.workspace = true
 glib-unix.workspace = true
+nucleo.workspace = true
+async-channel.workspace = true

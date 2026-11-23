@@ -17,7 +17,7 @@ The look follows the "Terra" mockups in `docs/design/`.
 ## Install (Arch Linux)
 
 ```sh
-git clone https://github.com/BrentWebBE/Patina.git meridian && cd meridian/packaging/arch
+git clone https://github.com/BrentWebBE/Meridian.git meridian && cd meridian/packaging/arch
 makepkg -si          # builds the package and installs it with pacman
 ```
 
@@ -57,6 +57,21 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 | Ctrl+Alt+F1..F12     | switch virtual terminal             |
 
 `Mod` is **Super** in a real session and **Alt** when nested.
+
+## Find
+
+Tap Super (or Mod+Space, or the logo button) and type. Find shows, in groups:
+
+- **Apps** from `.desktop` files, matched fuzzily: `ffx` finds Firefox.
+- **Actions**: overview, terminal, screenshot, layout, spaces, log out,
+  sleep, restart, shut down.
+- **Settings**: the three moods and "Follow the time of day".
+- **Files** by name from your home folder. Hidden folders and build folders
+  (`target`, `node_modules`, ...) are skipped; the index holds at most
+  60,000 files and is refreshed at most every two minutes.
+
+Up and Down move the highlight, Enter opens it, Tab completes the field to
+it, Esc closes. The strip at the bottom lists running apps.
 
 ## Configure
 
