@@ -4,10 +4,11 @@ A Wayland desktop environment and window manager for Arch Linux, written in Rust
 on top of [Smithay](https://github.com/Smithay/smithay). The goal: the structure
 of macOS (global menu bar, dock, overview) with the friendliness of Zorin OS.
 
-**Status: phase 3 of 6.** The compositor runs nested in a window or as a real
+**Status: phase 4 of 6.** The compositor runs nested in a window or as a real
 session from a TTY, with configurable keybindings, floating/tiled layouts, a
-top bar and a dock. There is no launcher or notification daemon yet. The
-real-session backend is new and has had little hardware testing.
+top bar, a dock, an app menu and notifications. Window shadows, the overview
+and the settings app are still to come. The real-session backend is new and
+has had little hardware testing.
 
 ![Target design](docs/design/top-bar-dock-layout-switcher.png)
 
@@ -42,6 +43,7 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 |----------------------|-------------------------------------|
 | Mod+Return           | open a terminal                     |
 | Mod+Q                | close the focused window            |
+| Mod+Space            | open or close the app menu          |
 | Mod+T                | toggle floating / tiled             |
 | Mod+Tab              | focus next window (Shift: previous) |
 | Mod+left-drag        | move a window                       |
@@ -67,12 +69,17 @@ apps and keybindings. Restart Meridian to apply changes.
 | `meridian-comp`   | the compositor                                       |
 | `meridian-bar`    | top bar (GTK 4, layer-shell)                         |
 | `meridian-dock`   | dock (GTK 4, layer-shell)                            |
+| `meridian-launcher` | app menu: search, pinned and all apps, power menu  |
+| `meridian-notify` | notification daemon (`org.freedesktop.Notifications`) |
 | `meridian-common` | shared config, theme tokens and the IPC protocol     |
 
-The bar and dock are ordinary Wayland clients. They learn about windows from
+The shell programs are ordinary Wayland clients. They learn about windows from
 the compositor over a small JSON socket (`$MERIDIAN_SOCKET`, see
-`meridian-common/src/ipc.rs`). The launcher, notification daemon and settings
-app are added as separate crates in later phases.
+`meridian-common/src/ipc.rs`). The settings app is added in a later phase.
+
+Try a notification with `notify-send "Hello" "from Meridian"`. Only one
+notification daemon can run per login session, so inside GNOME or KDE (nested
+mode) `meridian-notify` exits and the host desktop keeps showing them.
 
 Building needs `gtk4` and `gtk4-layer-shell` installed (`makepkg -s` does that).
 

@@ -1,0 +1,44 @@
+/* Colors come from meridian-common's theme tokens as --m-* variables. */
+
+window.notify-window {
+  background: transparent;
+}
+
+.stack {
+  margin: 8px 10px 16px 16px;     /* room for the shadows */
+}
+
+button.card {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--m-border);
+  background: var(--m-surface-raised);
+  box-shadow: 0 6px 18px var(--m-shadow);
+  color: var(--m-text);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+button.card:hover {
+  background: var(--m-surface-hover);
+}
+
+.card image {
+  -gtk-icon-size: 24px;
+  margin-right: 12px;
+  color: var(--m-accent);
+}
+
+.app {
+  font-size: 11px;
+  color: var(--m-text-muted);
+}
+
+.summary {
+  font-weight: 700;
+}
+
+.body {
+  color: var(--m-text-muted);
+}

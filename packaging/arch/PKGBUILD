@@ -8,16 +8,17 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
-pkgdesc="A Wayland desktop environment written in Rust (compositor, bar and dock; early development)"
+pkgdesc="A Wayland desktop environment written in Rust (early development)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/BrentWebBE/Patina"
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
+depends=('dbus' 'gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
          'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
 makedepends=('cargo' 'git')
 optdepends=('foot: terminal opened by the default Mod+Return binding'
+            'libnotify: notify-send, for testing notifications'
             'alacritty: alternative terminal')
 provides=('meridian')
 conflicts=('meridian')
@@ -40,7 +41,7 @@ check() {
 
 package() {
   cd "$_repo"
-  for bin in meridian-comp meridian-bar meridian-dock; do
+  for bin in meridian-comp meridian-bar meridian-dock meridian-launcher meridian-notify; do
     install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

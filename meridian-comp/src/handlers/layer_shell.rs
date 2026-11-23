@@ -8,10 +8,12 @@ use smithay::{
     desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output},
     output::Output,
     reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface},
+    utils::SERIAL_COUNTER,
     wayland::{
         compositor::with_states,
         shell::wlr_layer::{
-            Layer, LayerSurface as WlrLayerSurface, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceData, WlrLayerShellHandler,
+            WlrLayerShellState,
         },
     },
 };
@@ -58,6 +60,13 @@ impl WlrLayerShellHandler for Meridian {
         }
         // The reserved space is free again.
         self.apply_layout();
+
+        // If it held the keyboard (a closing launcher), hand the keyboard
+        // back to the topmost window.
+        if self.focused_surface.as_ref() == Some(surface.wl_surface()) {
+            let top = self.space.elements().next_back().cloned();
+            self.focus_window(top.as_ref());
+        }
     }
 }
 
@@ -87,21 +96,35 @@ impl Meridian {
 
         // `arrange` computes positions from anchors, margins and sizes, and
         // reports whether the space left for windows changed.
-        let zone_changed = {
+        let (zone_changed, wants_keyboard) = {
             let mut map = layer_map_for_output(&output);
             let changed = map.arrange();
+            let layer = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL);
             if !initial_configure_sent
-                && let Some(layer) = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                && let Some(layer) = &layer
             {
                 // Same handshake as for windows: the first configure tells
                 // the client its size, then it may draw.
                 layer.layer_surface().send_configure();
             }
-            changed
+            // "Exclusive" keyboard interactivity: the surface wants all typing
+            // while it is shown. Launchers and lock screens ask for this.
+            let wants_keyboard = layer.is_some_and(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                    && matches!(layer.layer(), Layer::Top | Layer::Overlay)
+            });
+            (changed, wants_keyboard)
         }; // the map's lock is released here, before we touch windows
 
         if zone_changed {
             self.apply_layout();
+        }
+        if wants_keyboard
+            && initial_configure_sent
+            && self.focused_surface.as_ref() != Some(surface)
+            && let Some(keyboard) = self.seat.get_keyboard()
+        {
+            keyboard.set_focus(self, Some(surface.clone()), SERIAL_COUNTER.next_serial());
         }
         true
     }
