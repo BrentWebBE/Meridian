@@ -118,6 +118,7 @@ fn main() -> anyhow::Result<()> {
     }
     state.start_theme_clock();
     state.init_wallpaper();
+    state.watch_config_files();
     state.autostart();
 
     if let Some((program, rest)) = args.split_first() {

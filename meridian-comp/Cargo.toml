@@ -15,6 +15,7 @@ xcursor.workspace = true
 png.workspace = true
 chrono.workspace = true
 image.workspace = true
+inotify.workspace = true
 cairo-rs.workspace = true
 pango.workspace = true
 pangocairo.workspace = true
