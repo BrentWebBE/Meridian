@@ -1,0 +1,476 @@
+//! The compositor's state: one struct that every event callback gets `&mut` access to.
+
+use std::{ffi::OsString, path::PathBuf, process::Command, sync::Arc, time::Duration, time::Instant};
+
+use anyhow::Context;
+use meridian_common::config::{Action, Config, LayoutKind};
+use smithay::{
+    backend::{
+        egl::EGLDevice,
+        renderer::{ImportDma, ImportMemWl, gles::GlesRenderer},
+    },
+    desktop::{PopupManager, Space, Window, WindowSurfaceType, utils::send_frames_surface_tree},
+    input::{
+        Seat, SeatState,
+        keyboard::{Keycode, XkbConfig},
+        pointer::CursorImageStatus,
+    },
+    output::Output,
+    reexports::{
+        calloop::{EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, generic::Generic},
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::{
+            Display, DisplayHandle,
+            backend::{ClientData, ClientId, DisconnectReason},
+            protocol::wl_surface::WlSurface,
+        },
+    },
+    utils::{Logical, Point, SERIAL_COUNTER},
+    wayland::{
+        compositor::{CompositorClientState, CompositorState},
+        dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState},
+        output::OutputManagerState,
+        selection::data_device::DataDeviceState,
+        shell::xdg::XdgShellState,
+        shm::ShmState,
+        socket::ListeningSocketSource,
+    },
+};
+
+use crate::{
+    backend::Backend,
+    grabs::ResizeState,
+    keys::{self, Binding},
+    layout::{self, Layout, Rect},
+};
+
+/// Terminals tried by "spawn-terminal" when the config does not name one.
+const TERMINALS: &[&str] = &["foot", "alacritty", "kitty", "ghostty", "weston-terminal"];
+
+pub struct Meridian {
+    pub start_time: Instant,
+    /// Name of our socket in `$XDG_RUNTIME_DIR`, e.g. "wayland-1".
+    pub socket_name: OsString,
+    pub display_handle: DisplayHandle,
+    /// Lets callbacks register new event sources (timers) later on.
+    pub loop_handle: LoopHandle<'static, Meridian>,
+    /// Lets any callback stop the event loop.
+    pub loop_signal: LoopSignal,
+
+    pub backend: Backend,
+    pub config: Config,
+    pub bindings: Vec<Binding>,
+
+    /// A 2D plane holding the windows (with position and stacking order) and outputs.
+    pub space: Space<Window>,
+    /// All windows in the order they were opened. The space's own order
+    /// changes whenever a window is raised, so tiling uses this list instead.
+    pub windows: Vec<Window>,
+    /// The active layout, as a trait object (see layout.rs).
+    pub layout: Box<dyn Layout>,
+    pub popups: PopupManager,
+
+    /// What clients want the pointer to look like right now.
+    pub cursor_status: CursorImageStatus,
+    /// The interactive resize in progress, if any (see grabs.rs).
+    pub resize: Option<ResizeState>,
+
+    /// Keys whose press triggered a compositor shortcut. Their release must not
+    /// reach the client either, or it would see a release without a press.
+    pub suppressed_keys: Vec<Keycode>,
+
+    // Smithay's per-protocol state. Each `XxxState::new` advertises a Wayland
+    // "global" that clients can bind to; the matching trait impls are in `handlers`.
+    pub compositor_state: CompositorState,
+    pub xdg_shell_state: XdgShellState,
+    pub shm_state: ShmState,
+    pub dmabuf_state: DmabufState,
+    pub _dmabuf_global: DmabufGlobal,
+    pub _output_manager_state: OutputManagerState,
+    pub seat_state: SeatState<Meridian>,
+    pub data_device_state: DataDeviceState,
+
+    /// A seat is one set of input devices (keyboard + pointer) and its focus.
+    pub seat: Seat<Self>,
+}
+
+impl Meridian {
+    pub fn new(
+        event_loop: &mut EventLoop<'static, Self>,
+        display: Display<Self>,
+        mut backend: Backend,
+        config: Config,
+    ) -> anyhow::Result<Self> {
+        let dh = display.handle();
+
+        // wl_compositor: lets clients create surfaces (rectangles of pixels).
+        let compositor_state = CompositorState::new::<Self>(&dh);
+        // xdg_shell: turns surfaces into desktop windows ("toplevels") and popups.
+        let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        // wl_shm: clients share pixel buffers through shared memory (CPU rendering).
+        let shm_state = ShmState::new::<Self>(&dh, backend.renderer().shm_formats());
+        // linux-dmabuf: clients share GPU buffers. Anything using OpenGL/Vulkan
+        // (Alacritty, GTK4, browsers) needs this.
+        let (dmabuf_state, dmabuf_global) = init_dmabuf(&dh, backend.renderer());
+        // wl_output / xdg_output: tells clients about monitors.
+        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
+        // wl_data_device: clipboard and drag-and-drop.
+        let data_device_state = DataDeviceState::new::<Self>(&dh);
+
+        let mut seat_state = SeatState::new();
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
+
+        // Keyboard layout from the config; empty strings mean "system default".
+        let keyboard = &config.keyboard;
+        let xkb = XkbConfig {
+            layout: &keyboard.layout,
+            variant: &keyboard.variant,
+            options: (!keyboard.options.is_empty()).then(|| keyboard.options.clone()),
+            ..XkbConfig::default()
+        };
+        seat.add_keyboard(xkb, keyboard.repeat_delay, keyboard.repeat_rate)
+            .context("failed to set up the keyboard: check [keyboard] in your config")?;
+        seat.add_pointer();
+
+        let socket_name = init_wayland_socket(display, event_loop)?;
+        let bindings = keys::parse_bindings(&config.keybindings, backend.mod_is_logo());
+        let layout = layout::from_kind(config.layout, &config);
+
+        Ok(Self {
+            start_time: Instant::now(),
+            socket_name,
+            display_handle: dh,
+            loop_handle: event_loop.handle(),
+            loop_signal: event_loop.get_signal(),
+            backend,
+            config,
+            bindings,
+            space: Space::default(),
+            windows: Vec::new(),
+            layout,
+            popups: PopupManager::default(),
+            cursor_status: CursorImageStatus::default_named(),
+            resize: None,
+            suppressed_keys: Vec::new(),
+            compositor_state,
+            xdg_shell_state,
+            shm_state,
+            dmabuf_state,
+            _dmabuf_global: dmabuf_global,
+            _output_manager_state: output_manager_state,
+            seat_state,
+            data_device_state,
+            seat,
+        })
+    }
+
+    // ---- windows and focus ------------------------------------------------
+
+    /// The window whose main surface is `surface`, if any.
+    pub fn window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
+        self.windows
+            .iter()
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .cloned() // `Window` is a cheap reference-counted handle
+    }
+
+    /// The surface under a point, with that surface's position in the space.
+    /// A window consists of several surfaces (popups, subsurfaces), hence the
+    /// second lookup inside the window.
+    pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let (window, window_loc) = self.space.element_under(pos)?;
+        window
+            .surface_under(pos - window_loc.to_f64(), WindowSurfaceType::ALL)
+            .map(|(surface, surface_loc)| (surface, (surface_loc + window_loc).to_f64()))
+    }
+
+    /// Give `window` keyboard focus and raise it; `None` clears the focus.
+    pub fn focus_window(&mut self, window: Option<&Window>) {
+        let serial = SERIAL_COUNTER.next_serial();
+        let keyboard = self.seat.get_keyboard().expect("seat has a keyboard");
+
+        match window {
+            Some(window) => {
+                // `true` also marks it "activated" and deactivates the others,
+                // which is what makes clients draw a focused/unfocused title bar.
+                self.space.raise_element(window, true);
+                let surface = window.toplevel().map(|t| t.wl_surface().clone());
+                keyboard.set_focus(self, surface, serial);
+            }
+            None => {
+                for w in self.space.elements() {
+                    w.set_activated(false);
+                }
+                keyboard.set_focus(self, None, serial);
+            }
+        }
+
+        // State changes like "activated" only reach clients in a configure event.
+        for w in &self.windows {
+            if let Some(toplevel) = w.toplevel() {
+                toplevel.send_pending_configure();
+            }
+        }
+    }
+
+    /// The window that currently has keyboard focus.
+    pub fn focused_window(&self) -> Option<Window> {
+        let focus = self.seat.get_keyboard()?.current_focus()?;
+        self.window_for_surface(&focus)
+    }
+
+    /// Focus the next (`step = 1`) or previous (`step = -1`) window.
+    fn focus_step(&mut self, step: isize) {
+        let count = self.windows.len() as isize;
+        if count == 0 {
+            return;
+        }
+        let current = self
+            .focused_window()
+            .and_then(|focused| self.windows.iter().position(|w| *w == focused));
+        let next = match current {
+            // `rem_euclid` wraps around in both directions (-1 becomes count - 1).
+            Some(index) => (index as isize + step).rem_euclid(count),
+            None => 0,
+        };
+        let window = self.windows[next as usize].clone();
+        self.focus_window(Some(&window));
+    }
+
+    // ---- layout -----------------------------------------------------------
+
+    /// The area windows may use: for now the whole first monitor.
+    /// The bar and dock will reserve their share in phase 3.
+    pub fn usable_area(&self) -> Option<Rect> {
+        let output = self.space.outputs().next()?;
+        self.space.output_geometry(output)
+    }
+
+    /// True when the layout decides window positions (so the user cannot drag them).
+    pub fn layout_is_managed(&self) -> bool {
+        self.layout.kind() != LayoutKind::Floating
+    }
+
+    /// Ask the active layout where windows go, and move/resize them accordingly.
+    pub fn apply_layout(&mut self) {
+        let Some(area) = self.usable_area() else { return };
+        let Some(rects) = self.layout.arrange(area, self.windows.len()) else {
+            return; // floating: nothing to do
+        };
+
+        for (window, rect) in self.windows.iter().zip(rects) {
+            if let Some(toplevel) = window.toplevel() {
+                // We cannot resize a client's window ourselves. We send the
+                // size we want in a configure event and the client redraws.
+                toplevel.with_pending_state(|state| {
+                    state.size = Some(rect.size);
+                    // "Tiled" tells the client to drop shadows and rounded
+                    // corners on those edges and to obey the size exactly.
+                    for edge in TILED_STATES {
+                        state.states.set(edge);
+                    }
+                });
+                toplevel.send_pending_configure();
+            }
+            self.space.map_element(window.clone(), rect.loc, false);
+        }
+    }
+
+    pub fn set_layout(&mut self, kind: LayoutKind) {
+        self.layout = layout::from_kind(kind, &self.config);
+        tracing::info!("layout: {kind:?}");
+
+        if !self.layout_is_managed() {
+            // Back to floating: windows keep their place but are free again.
+            for window in &self.windows {
+                if let Some(toplevel) = window.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        for edge in TILED_STATES {
+                            state.states.unset(edge);
+                        }
+                    });
+                    toplevel.send_pending_configure();
+                }
+            }
+        }
+        self.apply_layout();
+    }
+
+    // ---- actions ----------------------------------------------------------
+
+    /// Run an action from a keybinding.
+    pub fn run_action(&mut self, action: Action) {
+        match action {
+            Action::SpawnTerminal => self.spawn_terminal(),
+            Action::Spawn(command_line) => {
+                let mut parts = command_line.split_whitespace().map(String::from);
+                if let Some(program) = parts.next() {
+                    let args: Vec<String> = parts.collect();
+                    self.spawn(&program, &args);
+                }
+            }
+            Action::CloseWindow => {
+                // Polite request; the client decides (it may ask to save first).
+                if let Some(toplevel) = self.focused_window().as_ref().and_then(|w| w.toplevel()) {
+                    toplevel.send_close();
+                }
+            }
+            Action::Quit => self.loop_signal.stop(),
+            Action::ToggleLayout => {
+                let next = match self.layout.kind() {
+                    LayoutKind::Floating => LayoutKind::Tiled,
+                    LayoutKind::Tiled => LayoutKind::Floating,
+                };
+                self.set_layout(next);
+            }
+            Action::FocusNext => self.focus_step(1),
+            Action::FocusPrevious => self.focus_step(-1),
+        }
+    }
+
+    /// Start a program as a client of this compositor.
+    pub fn spawn(&self, program: &str, args: &[String]) {
+        let child = Command::new(program)
+            .args(args)
+            .env("WAYLAND_DISPLAY", &self.socket_name)
+            // We have no X server yet (phase 4); without this, X11-capable apps
+            // would open on the host desktop instead.
+            .env_remove("DISPLAY")
+            .spawn();
+
+        match child {
+            // Wait for the child on a helper thread so it does not linger as a zombie.
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(err) => tracing::error!("could not start `{program}`: {err}"),
+        }
+    }
+
+    pub fn spawn_terminal(&self) {
+        if !self.config.terminal.is_empty() {
+            return self.spawn(&self.config.terminal, &[]);
+        }
+        match TERMINALS.iter().find(|name| find_in_path(name).is_some()) {
+            Some(terminal) => self.spawn(terminal, &[]),
+            None => tracing::error!("no terminal found, tried: {}", TERMINALS.join(", ")),
+        }
+    }
+
+    // ---- per-frame housekeeping -------------------------------------------
+
+    /// Called by the backend after it drew `output`.
+    pub fn after_frame(&mut self, output: &Output) {
+        // Frame callbacks tell clients "now is a good time to draw the next
+        // frame". Without them most clients stop updating.
+        let elapsed = self.start_time.elapsed();
+        for window in self.space.elements_for_output(output) {
+            window.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        }
+        if let CursorImageStatus::Surface(surface) = &self.cursor_status {
+            send_frames_surface_tree(surface, output, elapsed, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+
+        // Forget closed windows and popups, then flush outgoing messages.
+        self.space.refresh();
+        self.popups.cleanup();
+        let _ = self.display_handle.flush_clients();
+    }
+}
+
+/// The four xdg_toplevel "tiled" edge states.
+const TILED_STATES: [xdg_toplevel::State; 4] = [
+    xdg_toplevel::State::TiledLeft,
+    xdg_toplevel::State::TiledRight,
+    xdg_toplevel::State::TiledTop,
+    xdg_toplevel::State::TiledBottom,
+];
+
+fn find_in_path(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Advertise linux-dmabuf with the formats our renderer can import.
+fn init_dmabuf(dh: &DisplayHandle, renderer: &mut GlesRenderer) -> (DmabufState, DmabufGlobal) {
+    let formats = renderer.dmabuf_formats();
+    let mut dmabuf_state = DmabufState::new();
+
+    // Newer clients (Mesa) want "feedback": which GPU device to allocate on.
+    let render_node = EGLDevice::device_for_display(renderer.egl_context().display())
+        .and_then(|device| device.try_get_render_node());
+
+    let feedback = match render_node {
+        Ok(Some(node)) => DmabufFeedbackBuilder::new(node.dev_id(), formats.clone())
+            .build()
+            .ok(),
+        _ => None,
+    };
+
+    let global = match feedback {
+        Some(feedback) => dmabuf_state.create_global_with_default_feedback::<Meridian>(dh, &feedback),
+        None => {
+            tracing::warn!("could not find the GPU render node; GPU clients may fail to start");
+            dmabuf_state.create_global::<Meridian>(dh, formats)
+        }
+    };
+
+    (dmabuf_state, global)
+}
+
+/// Create the socket clients connect to, and hook it into the event loop.
+fn init_wayland_socket(
+    display: Display<Meridian>,
+    event_loop: &mut EventLoop<'static, Meridian>,
+) -> anyhow::Result<OsString> {
+    // Picks the first free name: wayland-1 when your desktop already owns wayland-0.
+    let socket = ListeningSocketSource::new_auto().context("failed to create the Wayland socket")?;
+    let socket_name = socket.socket_name().to_os_string();
+    let handle = event_loop.handle();
+
+    // Event source 1: a new client connected to the socket.
+    handle
+        .insert_source(socket, |client_stream, _, state| {
+            // `Arc` is a thread-safe reference-counted pointer; the Wayland
+            // library keeps this per-client data alive as long as the client.
+            if let Err(err) = state
+                .display_handle
+                .insert_client(client_stream, Arc::new(ClientState::default()))
+            {
+                tracing::warn!("failed to add a client: {err}");
+            }
+        })
+        .map_err(|err| anyhow::anyhow!("failed to watch the Wayland socket: {err}"))?;
+
+    // Event source 2: an existing client sent requests. `display` moves into
+    // this source (ownership transfer); from now on we only use `DisplayHandle`.
+    handle
+        .insert_source(
+            Generic::new(display, Interest::READ, Mode::Level),
+            |_, display, state| {
+                // Safety: we never drop the display while the source is registered.
+                unsafe { display.get_mut().dispatch_clients(state)? };
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(|err| anyhow::anyhow!("failed to watch client messages: {err}"))?;
+
+    Ok(socket_name)
+}
+
+/// Data attached to each connected client.
+#[derive(Default)]
+pub struct ClientState {
+    pub compositor_state: CompositorClientState,
+}
+
+impl ClientData for ClientState {
+    fn initialized(&self, _client_id: ClientId) {}
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}

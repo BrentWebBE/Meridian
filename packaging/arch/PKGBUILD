@@ -1,0 +1,49 @@
+# Maintainer: The Meridian contributors
+#
+# Builds Meridian from the git checkout this file lives in:
+#
+#   cd packaging/arch && makepkg -si
+#
+# Once the project has a public repository this becomes a normal `meridian-git`
+# AUR package with a `source=("git+https://...")` line.
+
+pkgname=meridian-git
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A Wayland desktop environment written in Rust (compositor; early development)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/BrentWebBE/Patina"
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'libdrm' 'libglvnd' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'wayland')
+makedepends=('cargo' 'git')
+optdepends=('foot: terminal opened by the default Mod+Return binding'
+            'alacritty: alternative terminal')
+provides=('meridian')
+conflicts=('meridian')
+# Rust handles LTO itself (see [profile.release]); makepkg's C LTO flags only get in the way.
+options=('!lto')
+
+# The repository root, two levels above this PKGBUILD.
+_repo="$(realpath "${startdir:-$PWD}/../..")"
+
+build() {
+  cd "$_repo"
+  # --locked: fail instead of silently changing Cargo.lock (the pinned versions).
+  cargo build --release --locked
+}
+
+check() {
+  cd "$_repo"
+  cargo test --release --locked
+}
+
+package() {
+  cd "$_repo"
+  install -Dm755 target/release/meridian-comp "$pkgdir/usr/bin/meridian-comp"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  # Example configuration (the same file the built-in defaults come from).
+  install -Dm644 meridian-common/resources/default-config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
+  # Makes "Meridian" selectable in login managers such as GDM and SDDM.
+  install -Dm644 packaging/session/meridian.desktop "$pkgdir/usr/share/wayland-sessions/meridian.desktop"
+}
