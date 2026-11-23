@@ -1,0 +1,5 @@
+#%PAM-1.0
+# How the Meridian lock screen checks your password: the same way as
+# logging in. Installed to /etc/pam.d/meridian-lock.
+auth       include      system-auth
+account    include      system-auth

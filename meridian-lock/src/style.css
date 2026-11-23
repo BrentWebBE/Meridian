@@ -1,0 +1,103 @@
+/* Colors and fonts come from meridian-common's theme tokens as --m-* variables. */
+
+window.lock-window {
+  color: var(--m-text);
+  font-family: var(--m-font-ui);
+  font-size: 14px;
+}
+
+.clock {
+  font-family: var(--m-font-display);
+  font-size: 92px;
+  font-weight: 700;
+}
+
+.date {
+  margin-top: -6px;
+  margin-bottom: 44px;
+  font-size: 19px;
+}
+
+.card {
+  padding: 26px 28px 22px 28px;
+  border-radius: var(--m-radius-panel);
+  background: var(--m-surface);
+  border: 1px solid var(--m-border);
+  box-shadow: 0 14px 40px var(--m-shadow);
+}
+
+.avatar {
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 99px;
+  background: var(--m-accent);
+  color: var(--m-on-accent);
+  font-family: var(--m-font-display);
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.user-name {
+  color: var(--m-text);
+  margin: 12px 0 16px 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+entry.password {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 99px;
+  border: 2px solid var(--m-border);
+  outline: none;
+  box-shadow: none;
+  background: var(--m-surface-raised);
+  color: var(--m-text);
+}
+
+entry.password:focus-within {
+  border-color: var(--m-accent);
+}
+
+button.unlock {
+  min-height: 40px;
+  margin-top: 12px;
+  border: none;
+  box-shadow: none;
+  border-radius: 99px;
+  background: var(--m-accent);
+  color: var(--m-on-accent);
+  font-weight: 700;
+}
+
+button.unlock:hover {
+  background: color-mix(in srgb, var(--m-accent) 86%, var(--m-text));
+}
+
+.status {
+  margin-top: 12px;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--m-text-muted);
+}
+
+button.power {
+  padding: 8px 18px;
+  margin: 0 5px 26px 5px;
+  border-radius: 99px;
+  border: 1px solid var(--m-border);
+  box-shadow: none;
+  background: var(--m-surface);
+  color: var(--m-text);
+  font-weight: 400;
+}
+
+button.power:hover {
+  background: var(--m-surface-hover);
+}
+
+/* Keyboard focus must be visible. */
+button:focus-visible {
+  outline: 2px solid var(--m-accent);
+  outline-offset: 2px;
+}

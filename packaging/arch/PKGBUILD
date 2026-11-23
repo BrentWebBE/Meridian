@@ -8,19 +8,21 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.10.0
+pkgver=0.11.0
 pkgrel=1
 pkgdesc="A Wayland desktop environment written in Rust (early development)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/BrentWebBE/Meridian"
 license=('MIT')
 depends=('cairo' 'dbus' 'gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
-         'libxkbcommon' 'mesa' 'pango' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
+         'libxkbcommon' 'mesa' 'pam' 'pango' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
 makedepends=('cargo' 'git')
 optdepends=('foot: terminal opened by the default Mod+Return binding'
             'wireplumber: volume icon in the bar (wpctl)'
             'libnotify: notify-send, for testing notifications'
             'alacritty: alternative terminal')
+# Keep local changes to the lock screen's PAM rules on upgrade.
+backup=('etc/pam.d/meridian-lock')
 provides=('meridian')
 conflicts=('meridian')
 # Rust handles LTO itself (see [profile.release]); makepkg's C LTO flags only get in the way.
@@ -43,7 +45,7 @@ check() {
 package() {
   cd "$_repo"
   for bin in meridian-comp meridian-bar meridian-dock meridian-launcher meridian-notify meridian-settings \
-             meridian-desktop; do
+             meridian-desktop meridian-lock; do
     install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -52,6 +54,8 @@ package() {
   install -Dm644 meridian-common/resources/default-config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
   # The three moods' colors, as a template for ~/.config/meridian/themes.toml.
   install -Dm644 meridian-common/resources/themes.toml "$pkgdir/usr/share/doc/$pkgname/themes.toml"
+  # How the lock screen checks passwords. Without it meridian-lock refuses to lock.
+  install -Dm644 packaging/pam/meridian-lock "$pkgdir/etc/pam.d/meridian-lock"
   # Lets Find and the dock list the Settings app.
   install -Dm644 packaging/applications/org.meridian.Settings.desktop \
     "$pkgdir/usr/share/applications/org.meridian.Settings.desktop"

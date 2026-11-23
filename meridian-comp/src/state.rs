@@ -41,6 +41,7 @@ use smithay::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState},
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
+        session_lock::SessionLockManagerState,
         shell::{
             wlr_layer::{Layer, WlrLayerShellState},
             xdg::{XdgShellState, decoration::XdgDecorationState},
@@ -55,6 +56,7 @@ use crate::{
     decorations::{self, TITLE_HEIGHT},
     effects::Effects,
     grabs::ResizeState,
+    lock::Lock,
     ipc::IpcServer,
     keys::{self, Binding},
     layout::{self, Layout, Rect},
@@ -110,6 +112,10 @@ pub struct Meridian {
     /// The interactive resize in progress, if any (see grabs.rs).
     pub resize: Option<ResizeState>,
 
+    /// Session lock state, see lock.rs.
+    pub lock: Lock,
+    pub session_lock_state: SessionLockManagerState,
+
     /// Connections from shell programs (bar, dock), see ipc.rs.
     pub ipc: IpcServer,
     pub next_window_id: u32,
@@ -156,6 +162,10 @@ impl Meridian {
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         // xdg-decoration: lets clients hand the title bar over to us (decorations.rs).
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        // ext-session-lock: lets the lock screen program lock the session (lock.rs).
+        // The filter decides which clients may see the protocol: all of them,
+        // as locking can only take access away.
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_client| true);
         // wl_shm: clients share pixel buffers through shared memory (CPU rendering).
         let shm_state = ShmState::new::<Self>(&dh, backend.renderer().shm_formats());
         // linux-dmabuf: clients share GPU buffers. Anything using OpenGL/Vulkan
@@ -211,6 +221,8 @@ impl Meridian {
             focused_surface: None,
             cursor_status: CursorImageStatus::default_named(),
             resize: None,
+            lock: Lock::default(),
+            session_lock_state,
             ipc: IpcServer::default(),
             next_window_id: 1,
             ipc_socket: None,
@@ -278,6 +290,11 @@ impl Meridian {
     /// Stacking order, top to bottom: overlay and top layers (bar, dock),
     /// windows, then bottom and background layers (wallpaper).
     pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+        // While locked nothing but the lock screen can be pointed at.
+        if self.lock.locked {
+            return self.lock_surface_under(pos);
+        }
+
         if let Some((_, surface, loc)) = self.layer_under(pos, &[Layer::Overlay, Layer::Top]) {
             return Some((surface, loc));
         }
@@ -302,6 +319,10 @@ impl Meridian {
 
     /// Give `window` keyboard focus and raise it; `None` clears the focus.
     pub fn focus_window(&mut self, window: Option<&Window>) {
+        // While locked the keyboard belongs to the lock screen alone.
+        if self.lock.locked {
+            return;
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let keyboard = self.seat.get_keyboard().expect("seat has a keyboard");
 
@@ -617,7 +638,13 @@ impl Meridian {
 
     /// Run an action from a keybinding.
     pub fn run_action(&mut self, action: Action) {
+        // While locked, shortcuts and requests do nothing. (A screenshot
+        // is allowed: it can only show the lock screen.)
+        if self.lock.locked && action != Action::Screenshot {
+            return;
+        }
         match action {
+            Action::Lock => self.lock_session(),
             Action::SpawnTerminal => self.spawn_terminal(),
             Action::Spawn(command_line) => {
                 let mut parts = command_line.split_whitespace().map(String::from);
@@ -698,6 +725,7 @@ impl Meridian {
             effects: &self.effects,
             focused: self.focused_window(),
             overview: self.overview_scene(),
+            lock: self.lock.locked.then_some(self.lock.surfaces.as_slice()),
             cursor: None,
         };
         match crate::backend::screenshot(self.backend.renderer(), &output, &scene, &path) {
@@ -738,6 +766,8 @@ impl Meridian {
                 Some(output.clone())
             });
         }
+
+        self.lock_after_frame(output);
 
         // Forget closed windows and popups, then flush outgoing messages.
         self.space.refresh();

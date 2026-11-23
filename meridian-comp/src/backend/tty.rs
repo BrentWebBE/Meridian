@@ -422,6 +422,7 @@ impl Meridian {
             effects: &self.effects,
             focused,
             overview,
+            lock: self.lock.locked.then_some(self.lock.surfaces.as_slice()),
             cursor: Some(CursorFrame {
                 status: &self.cursor_status,
                 image: &tty.cursor,

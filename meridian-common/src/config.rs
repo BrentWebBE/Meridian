@@ -141,6 +141,8 @@ pub enum Action {
     MoveToWorkspace(u8),
     /// Give the dock the keyboard, to pick an app with arrows and Enter.
     FocusDock,
+    /// Lock the screen until the password is entered.
+    Lock,
     /// Run a command line (split on whitespace, no shell).
     Spawn(String),
 }

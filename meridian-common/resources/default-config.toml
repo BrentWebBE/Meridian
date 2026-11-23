@@ -72,7 +72,7 @@ pinned = [
 # Key names are XKB keysym names (Return, Tab, space, a-z, F1, ...).
 #
 # Actions: "spawn-terminal", "close-window", "quit", "toggle-layout",
-# "focus-next", "focus-previous", "screenshot", "toggle-overview", "focus-dock",
+# "focus-next", "focus-previous", "screenshot", "toggle-overview", "focus-dock", "lock",
 # { workspace = 2 }, { move-to-workspace = 2 }, { spawn = "command with args" }.
 
 [keybindings]
@@ -88,6 +88,7 @@ pinned = [
 "Mod+space" = { spawn = "meridian-launcher" }
 "Mod+O" = "toggle-overview"
 "Mod+D" = "focus-dock"
+"Mod+L" = "lock"
 "Mod+1" = { workspace = 1 }
 "Mod+2" = { workspace = 2 }
 "Mod+3" = { workspace = 3 }

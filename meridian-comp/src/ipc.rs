@@ -95,6 +95,11 @@ impl Meridian {
     }
 
     fn ipc_handle(&mut self, request: Request) {
+        // While locked, other programs cannot steer the desktop.
+        // (`run_action` applies the same rule to actions.)
+        if self.lock.locked && !matches!(request, Request::Action(_)) {
+            return;
+        }
         match request {
             Request::FocusWindow { id } => {
                 let window = self.windows.iter().find(|w| window_id(w) == Some(id)).cloned();

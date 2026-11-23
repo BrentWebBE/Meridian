@@ -93,6 +93,7 @@ pub fn attach(
                             effects: &state.effects,
                             focused,
                             overview,
+                            lock: state.lock.locked.then_some(state.lock.surfaces.as_slice()),
                             cursor: None,
                         };
                         let elements = output_elements(renderer, &output, &scene);
