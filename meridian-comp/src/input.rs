@@ -46,7 +46,7 @@ impl Meridian {
                 self.move_pointer(pos, event.time());
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let Some(area) = self.usable_area() else { return };
+                let Some(area) = self.output_area() else { return };
                 let pos = event.position_transformed(area.size) + area.loc.to_f64();
                 self.move_pointer(pos, event.time());
             }
@@ -148,8 +148,19 @@ impl Meridian {
         let serial = SERIAL_COUNTER.next_serial();
         let button = event.button_code();
 
-        if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-            let location = pointer.current_location();
+        let location = pointer.current_location();
+        let on_layer = self.layer_surface_under(location);
+
+        if event.state() == ButtonState::Pressed
+            && !pointer.is_grabbed()
+            && let Some(layer) = &on_layer
+        {
+            // Clicking the bar or dock leaves window focus alone, unless the
+            // layer surface wants the keyboard (a launcher's search field).
+            if layer.can_receive_keyboard_focus() {
+                keyboard.set_focus(self, Some(layer.wl_surface().clone()), serial);
+            }
+        } else if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
             let window = self.space.element_under(location).map(|(w, _)| w.clone());
 
             // Click-to-focus: clicking a window focuses and raises it,

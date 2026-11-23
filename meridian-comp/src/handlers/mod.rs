@@ -3,6 +3,7 @@
 //! what clients requested.
 
 mod compositor;
+mod layer_shell;
 mod xdg_shell;
 
 use smithay::{
@@ -48,6 +49,12 @@ impl SeatHandler for Meridian {
         let dh = &self.display_handle;
         let client = focused.and_then(|surface| dh.get_client(surface.id()).ok());
         set_data_device_focus(dh, seat, client);
+
+        // Note: the keyboard is locked during this call. Do not call
+        // `seat.get_keyboard()` methods from here.
+        self.focused_surface = focused.cloned();
+        // The bar shows the focused app.
+        self.ipc_broadcast();
     }
 }
 

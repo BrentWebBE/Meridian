@@ -32,6 +32,7 @@ impl XdgShellHandler for Meridian {
         let location = (origin.x + 48 + step * 32, origin.y + 48 + step * 32);
 
         self.space.map_element(window.clone(), location, false);
+        self.ipc_register_window(&window);
         self.windows.push(window.clone());
         self.apply_layout();
         self.focus_window(Some(&window));
@@ -52,6 +53,16 @@ impl XdgShellHandler for Meridian {
             .find(|w| w.toplevel().is_some_and(|t| *t != surface))
             .cloned();
         self.focus_window(next.as_ref());
+        self.ipc_broadcast();
+    }
+
+    // The dock matches windows to apps by app id, the bar shows it.
+    fn app_id_changed(&mut self, _surface: ToplevelSurface) {
+        self.ipc_broadcast();
+    }
+
+    fn title_changed(&mut self, _surface: ToplevelSurface) {
+        self.ipc_broadcast();
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {

@@ -5,26 +5,28 @@
 
 use std::{collections::HashMap, fmt, path::PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The built-in defaults, also installed as an example file.
 pub const DEFAULT_CONFIG: &str = include_str!("../resources/default-config.toml");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-// `default`: missing keys take their value from `Config::default()`.
 // `deny_unknown_fields`: typos are reported instead of silently ignored.
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
     pub layout: LayoutKind,
     pub terminal: String,
+    /// Programs started together with the compositor (bar, dock, ...).
+    pub autostart: Vec<String>,
     pub keyboard: Keyboard,
     pub output: Output,
     pub tiled: Tiled,
+    pub dock: Dock,
     /// Key combination (e.g. "Mod+Return") to action.
     pub keybindings: HashMap<String, Action>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LayoutKind {
     Floating,
@@ -32,7 +34,7 @@ pub enum LayoutKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Keyboard {
     pub layout: String,
     pub variant: String,
@@ -42,24 +44,31 @@ pub struct Keyboard {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Output {
     /// 0 means "choose automatically".
     pub scale: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Tiled {
     pub gap: i32,
     pub master_ratio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Dock {
+    /// Desktop file ids without ".desktop", e.g. "org.gnome.Nautilus".
+    pub pinned: Vec<String>,
 }
 
 /// What a keybinding does.
 ///
 /// In TOML a plain variant is a string (`"close-window"`) and a variant with
 /// data is a small table (`{ spawn = "firefox" }`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
     SpawnTerminal,
@@ -68,6 +77,8 @@ pub enum Action {
     ToggleLayout,
     FocusNext,
     FocusPrevious,
+    /// Save a picture of the screen to ~/Pictures/Screenshots.
+    Screenshot,
     /// Run a command line (split on whitespace, no shell).
     Spawn(String),
 }
@@ -105,110 +116,43 @@ impl Config {
             return Ok(Self::default());
         };
         match std::fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).map_err(|err| ConfigError::Parse(path, err)),
+            Ok(text) => Self::parse(&text).map_err(|err| ConfigError::Parse(path, err)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(err) => Err(ConfigError::Read(path, err)),
         }
     }
-}
 
-/// The values of the embedded default file, parsed once per call.
-struct Defaults {
-    layout: LayoutKind,
-    terminal: String,
-    keyboard: Keyboard,
-    output: Output,
-    tiled: Tiled,
-    keybindings: HashMap<String, Action>,
-}
+    /// Parse a user config, filling everything it leaves out from the defaults.
+    ///
+    /// Both files are first read as generic TOML tables and merged; only the
+    /// merged result is turned into a `Config`. That keeps the default file
+    /// the single place where default values are written down.
+    pub fn parse(user: &str) -> Result<Self, toml::de::Error> {
+        let mut merged: toml::Table =
+            toml::from_str(DEFAULT_CONFIG).expect("built-in default config is valid TOML");
+        let user: toml::Table = toml::from_str(user)?;
 
-// The `Default` impls below all read from DEFAULT_CONFIG, so the TOML file is
-// the single place where defaults are written down. This mirror struct has no
-// `#[serde(default)]`, which avoids `Config::default()` calling itself.
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct RawDefaults {
-    layout: LayoutKind,
-    terminal: String,
-    keyboard: RawKeyboard,
-    output: RawOutput,
-    tiled: RawTiled,
-    keybindings: HashMap<String, Action>,
-}
+        for (key, value) in user {
+            match (merged.get_mut(&key), value) {
+                // A section like [tiled]: override only the keys the user wrote.
+                (Some(toml::Value::Table(defaults)), toml::Value::Table(overrides)) if key != "keybindings" => {
+                    defaults.extend(overrides);
+                }
+                // Plain values, and [keybindings] as a whole, replace the default.
+                (_, value) => {
+                    merged.insert(key, value);
+                }
+            }
+        }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct RawKeyboard {
-    layout: String,
-    variant: String,
-    options: String,
-    repeat_delay: i32,
-    repeat_rate: i32,
-}
-
-#[derive(Deserialize)]
-struct RawOutput {
-    scale: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct RawTiled {
-    gap: i32,
-    master_ratio: f64,
-}
-
-fn defaults() -> Defaults {
-    // A test below guarantees the embedded file parses, so this cannot fail at runtime.
-    let raw: RawDefaults = toml::from_str(DEFAULT_CONFIG).expect("built-in default config is valid");
-    Defaults {
-        layout: raw.layout,
-        terminal: raw.terminal,
-        keyboard: Keyboard {
-            layout: raw.keyboard.layout,
-            variant: raw.keyboard.variant,
-            options: raw.keyboard.options,
-            repeat_delay: raw.keyboard.repeat_delay,
-            repeat_rate: raw.keyboard.repeat_rate,
-        },
-        output: Output { scale: raw.output.scale },
-        tiled: Tiled {
-            gap: raw.tiled.gap,
-            master_ratio: raw.tiled.master_ratio,
-        },
-        keybindings: raw.keybindings,
+        merged.try_into()
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        let d = defaults();
-        Self {
-            layout: d.layout,
-            terminal: d.terminal,
-            keyboard: d.keyboard,
-            output: d.output,
-            tiled: d.tiled,
-            keybindings: d.keybindings,
-        }
-    }
-}
-
-impl Default for Keyboard {
-    fn default() -> Self {
-        defaults().keyboard
-    }
-}
-
-impl Default for Output {
-    fn default() -> Self {
-        defaults().output
-    }
-}
-
-impl Default for Tiled {
-    fn default() -> Self {
-        defaults().tiled
+        // A test below guarantees the embedded file parses.
+        Self::parse("").expect("built-in default config is valid")
     }
 }
 
@@ -218,14 +162,14 @@ mod tests {
 
     #[test]
     fn default_file_parses_as_user_config() {
-        let config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let config = Config::parse(DEFAULT_CONFIG).unwrap();
         assert_eq!(config, Config::default());
         assert_eq!(config.keybindings["Mod+Return"], Action::SpawnTerminal);
     }
 
     #[test]
     fn partial_config_keeps_other_defaults() {
-        let config: Config = toml::from_str("layout = \"tiled\"\n[tiled]\ngap = 4\n").unwrap();
+        let config = Config::parse("layout = \"tiled\"\n[tiled]\ngap = 4\n").unwrap();
         assert_eq!(config.layout, LayoutKind::Tiled);
         assert_eq!(config.tiled.gap, 4);
         assert_eq!(config.tiled.master_ratio, Config::default().tiled.master_ratio);
@@ -234,14 +178,15 @@ mod tests {
 
     #[test]
     fn spawn_action_takes_a_command() {
-        let config: Config = toml::from_str("[keybindings]\n\"Mod+B\" = { spawn = \"firefox --new-window\" }\n").unwrap();
+        let config = Config::parse("[keybindings]\n\"Mod+B\" = { spawn = \"firefox --new-window\" }\n").unwrap();
         assert_eq!(config.keybindings["Mod+B"], Action::Spawn("firefox --new-window".into()));
         assert_eq!(config.keybindings.len(), 1);
     }
 
     #[test]
     fn unknown_keys_are_rejected() {
-        assert!(toml::from_str::<Config>("layuot = \"tiled\"").is_err());
-        assert!(toml::from_str::<Config>("[keybindings]\n\"Mod+X\" = \"explode\"").is_err());
+        assert!(Config::parse("layuot = \"tiled\"").is_err());
+        assert!(Config::parse("[keybindings]\n\"Mod+X\" = \"explode\"").is_err());
+        assert!(Config::parse("[tiled]\ngapp = 3").is_err());
     }
 }

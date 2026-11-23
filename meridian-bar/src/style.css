@@ -1,0 +1,40 @@
+/* Colors come from meridian-common's theme tokens as --m-* variables. */
+
+window.bar {
+  background: var(--m-surface);
+  color: var(--m-text);
+  border-bottom: 1px solid var(--m-border);
+  font-size: 13px;
+}
+
+.bar-content {
+  padding: 0 10px;
+}
+
+button.menu {
+  min-width: 22px;
+  min-height: 20px;
+  padding: 0;
+  margin: 3px 0;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
+  background: var(--m-accent);
+  color: var(--m-on-accent);
+}
+
+button.menu:hover {
+  background: color-mix(in srgb, var(--m-accent) 88%, black);
+}
+
+.app-name {
+  font-weight: 700;
+}
+
+.status image {
+  -gtk-icon-size: 16px;
+}
+
+.clock {
+  font-feature-settings: "tnum"; /* digits of equal width: no jitter */
+}

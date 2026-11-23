@@ -8,13 +8,14 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
-pkgdesc="A Wayland desktop environment written in Rust (compositor; early development)"
+pkgdesc="A Wayland desktop environment written in Rust (compositor, bar and dock; early development)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/BrentWebBE/Patina"
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'libdrm' 'libglvnd' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'wayland')
+depends=('gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
+         'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
 makedepends=('cargo' 'git')
 optdepends=('foot: terminal opened by the default Mod+Return binding'
             'alacritty: alternative terminal')
@@ -39,7 +40,9 @@ check() {
 
 package() {
   cd "$_repo"
-  install -Dm755 target/release/meridian-comp "$pkgdir/usr/bin/meridian-comp"
+  for bin in meridian-comp meridian-bar meridian-dock; do
+    install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
+  done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   # Example configuration (the same file the built-in defaults come from).
