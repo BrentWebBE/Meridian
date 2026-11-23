@@ -48,6 +48,7 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 | Super (tap) or Mod+Space | open or close Find              |
 | Mod+O                | overview: thumbnails and spaces     |
 | Mod+D                | keyboard to the dock (arrows, Enter, Esc) |
+| Mod+L                | lock the screen                     |
 | Mod+1 .. Mod+4       | switch space (add Shift: move window) |
 | Mod+T                | toggle floating / tiled             |
 | Mod+Tab              | focus next window (Shift: previous) |
@@ -73,6 +74,21 @@ Tap Super (or Mod+Space, or the logo button) and type. Find shows, in groups:
 
 Up and Down move the highlight, Enter opens it, Tab completes the field to
 it, Esc closes. The strip at the bottom lists running apps.
+
+## Lock screen
+
+Mod+L (or "Lock the screen" in Find) starts `meridian-lock`. The compositor
+then shows only the lock screen and sends input nowhere else until the
+password is accepted. If the lock program crashes, the session stays locked
+and the program is started again.
+
+Passwords are checked with PAM using `/etc/pam.d/meridian-lock`, which the
+package installs. Without that file `meridian-lock` refuses to lock, because
+no password could ever be accepted.
+
+If you cannot get back in (for example after changing PAM rules), switch to
+another console with Ctrl+Alt+F3, log in there and run `pkill meridian-comp`.
+That ends the Meridian session.
 
 ## Configure
 
@@ -121,6 +137,7 @@ running-dots = true
 | `meridian-notify` | notification daemon (`org.freedesktop.Notifications`) |
 | `meridian-settings` | Settings app: Appearance and Launching apps         |
 | `meridian-desktop` | desktop icons: Home, Documents, Projects, Trash      |
+| `meridian-lock`   | lock screen (ext-session-lock-v1, PAM)               |
 | `meridian-common` | shared config, theme tokens and the IPC protocol     |
 
 The shell programs are ordinary Wayland clients. They learn about windows from

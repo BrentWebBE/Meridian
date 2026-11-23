@@ -74,7 +74,7 @@ impl Meridian {
             let is_super = matches!(handle.modified_sym(), Keysym::Super_L | Keysym::Super_R);
             if key_state == KeyState::Pressed {
                 state.super_tap = is_super && state.backend.mod_is_logo();
-            } else if is_super && state.super_tap {
+            } else if is_super && state.super_tap && !state.lock.locked {
                 state.super_tap = false;
                 state.open_find_after_key = true;
             }
@@ -94,6 +94,9 @@ impl Meridian {
             let sym = handle.modified_sym().raw();
             let action = if (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&sym) {
                 Some(KeyAction::ChangeVt((sym - keysyms::KEY_XF86Switch_VT_1 + 1) as i32))
+            } else if state.lock.locked {
+                // Locked: no shortcuts, every key goes to the lock screen.
+                None
             } else {
                 // `raw_syms` is the key without Shift applied, so "Mod+Shift+E"
                 // matches on `e` plus the Shift modifier.
@@ -169,6 +172,21 @@ impl Meridian {
         let on_layer = self.layer_surface_under(location);
         // A mouse button between Super press and release means "Super+drag", not a tap.
         self.super_tap = false;
+
+        // Locked: no window management, the click goes to the lock screen.
+        if self.lock.locked {
+            pointer.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state: event.state(),
+                    serial,
+                    time: event.time(),
+                },
+            );
+            pointer.frame(self);
+            return;
+        }
 
         // In the overview, clicks pick a thumbnail or a space instead of
         // going to a client. Bar, dock and the search field still work.

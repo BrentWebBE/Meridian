@@ -21,7 +21,7 @@ use smithay::{
     input::pointer::{CursorImageStatus, CursorImageSurfaceData},
     output::Output,
     utils::{Logical, Physical, Point, Scale},
-    wayland::{compositor::with_states, shell::wlr_layer::Layer},
+    wayland::{compositor::with_states, session_lock::LockSurface, shell::wlr_layer::Layer},
 };
 
 use crate::{
@@ -97,6 +97,9 @@ pub struct Scene<'a> {
     pub focused: Option<Window>,
     /// Present while the overview is open; replaces the normal windows.
     pub overview: Option<OverviewScene>,
+    /// Present while the session is locked: the lock screen's surfaces.
+    /// Nothing else is drawn then.
+    pub lock: Option<&'a [(Output, LockSurface)]>,
     pub cursor: Option<CursorFrame<'a>>,
 }
 
@@ -146,6 +149,30 @@ pub fn output_elements(renderer: &mut GlesRenderer, output: &Output, scene: &Sce
                 }
             }
         }
+    }
+
+    // While locked: only the lock screen (or a plain backdrop if it is
+    // not there yet). No window, bar or notification may show through.
+    if let Some(lock_surfaces) = scene.lock {
+        if let Some((_, surface)) = lock_surfaces
+            .iter()
+            .find(|(candidate, surface)| candidate == output && surface.alive())
+        {
+            elements.extend(
+                render_elements_from_surface_tree(
+                    renderer,
+                    surface.wl_surface(),
+                    (0, 0),
+                    Scale::from(scale),
+                    1.0,
+                    Kind::Unspecified,
+                )
+                .into_iter()
+                .map(OutputElement::Surface),
+            );
+        }
+        elements.push(OutputElement::Shader(scene.effects.wallpaper(output, output_geo.size)));
+        return elements;
     }
 
     // 2. Bar, dock, launcher, notifications.

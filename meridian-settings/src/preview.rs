@@ -34,16 +34,6 @@ fn rounded_rect(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: f64
     cr.close_path();
 }
 
-/// An ellipse, drawn as a circle under a squashing transform.
-fn ellipse(cr: &cairo::Context, cx: f64, cy: f64, rx: f64, ry: f64) {
-    cr.save().ok();
-    cr.translate(cx, cy);
-    cr.scale(rx, ry);
-    cr.new_path();
-    cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * PI);
-    cr.restore().ok();
-}
-
 /// The landscape in the given mood (`None` = whatever mood is active now).
 pub fn landscape(mood: Option<Mood>, overlay: Overlay) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::builder()
@@ -61,20 +51,7 @@ pub fn landscape(mood: Option<Mood>, overlay: Overlay) -> gtk::DrawingArea {
         rounded_rect(cr, 0.0, 0.0, w, h, 10.0);
         cr.clip();
 
-        set_color(cr, theme.sky);
-        cr.paint().ok();
-
-        // The same composition as the real wallpaper shader.
-        let hills = [
-            (theme.hills[0], 0.30, 0.668, 0.70, 0.60),
-            (theme.hills[1], 0.83, 0.757, 0.62, 0.55),
-            (theme.hills[2], 0.28, 0.866, 0.62, 0.46),
-        ];
-        for (color, cx, top, rx, ry) in hills {
-            set_color(cr, color);
-            ellipse(cr, cx * w, top * h + ry * h, rx * w, ry * h);
-            cr.fill().ok();
-        }
+        shell::paint_landscape(cr, w, h, &theme);
 
         set_color(cr, theme.surface);
         match overlay {

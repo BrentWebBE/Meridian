@@ -10,10 +10,11 @@ members = [
     "meridian-notify",
     "meridian-settings",
     "meridian-desktop",
+    "meridian-lock",
 ]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -30,6 +31,11 @@ glib-unix = "0.22.8"
 zbus = "6.5.0"
 nucleo = "0.5.0"
 inotify = "0.11.5"
+# Lock screen: the session-lock protocol for GTK, PAM for the password check,
+# and zeroize to wipe the password from memory.
+gtk4-session-lock = "0.5.0"
+pam-client = "0.5.0"
+zeroize = "1.9.2"
 async-channel = "2.5.0"
 gtk4-layer-shell = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }

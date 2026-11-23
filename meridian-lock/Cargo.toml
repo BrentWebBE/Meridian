@@ -1,0 +1,16 @@
+[package]
+name = "meridian-lock"
+description = "The Meridian lock screen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-common = { workspace = true, features = ["gtk"] }
+gtk.workspace = true
+gtk4-session-lock.workspace = true
+async-channel.workspace = true
+pam-client.workspace = true
+zeroize.workspace = true

@@ -123,6 +123,35 @@ pub fn reduced_motion() -> bool {
     gtk::Settings::default().is_some_and(|settings| !settings.is_gtk_enable_animations())
 }
 
+/// Paint the Terra landscape (sky, sun, three hills) in a theme's colors,
+/// filling a `width` x `height` area. The same composition as the
+/// compositor's wallpaper shader; used for previews and the lock screen.
+pub fn paint_landscape(cr: &gtk::cairo::Context, width: f64, height: f64, theme: &crate::theme::Theme) {
+    use std::f64::consts::PI;
+    let set = |color: crate::theme::Color| cr.set_source_rgb(color.r as f64, color.g as f64, color.b as f64);
+    // An ellipse is a circle drawn under a squashing transform.
+    let ellipse = |cx: f64, cy: f64, rx: f64, ry: f64| {
+        let _ = cr.save();
+        cr.translate(cx, cy);
+        cr.scale(rx, ry);
+        cr.new_path();
+        cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * PI);
+        let _ = cr.restore();
+        let _ = cr.fill();
+    };
+
+    set(theme.sky);
+    let _ = cr.paint();
+    set(theme.sun);
+    ellipse(0.76 * width, 0.205 * height, 0.083 * height, 0.083 * height);
+    // Each hill: where its top is, and how wide and tall its ellipse is.
+    let hills = [(0.30, 0.668, 0.70, 0.60), (0.83, 0.757, 0.62, 0.55), (0.28, 0.866, 0.62, 0.46)];
+    for (color, (cx, top, rx, ry)) in theme.hills.into_iter().zip(hills) {
+        set(color);
+        ellipse(cx * width, top * height + ry * height, rx * width, ry * height);
+    }
+}
+
 /// The hour of the day (0-23) in local time.
 pub fn current_hour() -> u32 {
     glib::DateTime::now_local().map(|now| now.hour() as u32).unwrap_or(12)

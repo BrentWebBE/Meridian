@@ -21,6 +21,7 @@ mod input;
 mod ipc;
 mod keys;
 mod layout;
+mod lock;
 mod overview;
 mod state;
 

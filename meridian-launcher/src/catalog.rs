@@ -50,6 +50,7 @@ pub fn actions() -> Vec<Entry> {
         request("Go to space 2", "workspace desktop", Action::Workspace(2)),
         request("Go to space 3", "workspace desktop", Action::Workspace(3)),
         request("Go to space 4", "workspace desktop", Action::Workspace(4)),
+        request("Lock the screen", "password away", Action::Lock),
         request("Log out", "quit exit end session", Action::Quit),
         power("Sleep", "suspend standby", "suspend"),
         power("Restart", "reboot", "reboot"),
