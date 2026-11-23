@@ -9,7 +9,10 @@ use smithay::{
         egl::EGLDevice,
         renderer::{ImportDma, ImportMemWl, gles::GlesRenderer},
     },
-    desktop::{PopupManager, Space, Window, WindowSurfaceType, utils::send_frames_surface_tree},
+    desktop::{
+        LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output,
+        utils::send_frames_surface_tree,
+    },
     input::{
         Seat, SeatState,
         keyboard::{Keycode, XkbConfig},
@@ -31,7 +34,10 @@ use smithay::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState},
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
-        shell::xdg::XdgShellState,
+        shell::{
+            wlr_layer::{Layer, WlrLayerShellState},
+            xdg::XdgShellState,
+        },
         shm::ShmState,
         socket::ListeningSocketSource,
     },
@@ -40,6 +46,7 @@ use smithay::{
 use crate::{
     backend::Backend,
     grabs::ResizeState,
+    ipc::IpcServer,
     keys::{self, Binding},
     layout::{self, Layout, Rect},
 };
@@ -70,10 +77,21 @@ pub struct Meridian {
     pub layout: Box<dyn Layout>,
     pub popups: PopupManager,
 
+    /// The surface with keyboard focus, kept up to date by `focus_changed`.
+    /// We keep our own copy because Smithay holds the keyboard's lock while
+    /// it notifies us, so asking the keyboard at that moment would deadlock.
+    pub focused_surface: Option<WlSurface>,
+
     /// What clients want the pointer to look like right now.
     pub cursor_status: CursorImageStatus,
     /// The interactive resize in progress, if any (see grabs.rs).
     pub resize: Option<ResizeState>,
+
+    /// Connections from shell programs (bar, dock), see ipc.rs.
+    pub ipc: IpcServer,
+    pub next_window_id: u32,
+    /// Path of the IPC socket, passed to programs we start.
+    pub ipc_socket: Option<PathBuf>,
 
     /// Keys whose press triggered a compositor shortcut. Their release must not
     /// reach the client either, or it would see a release without a press.
@@ -83,6 +101,7 @@ pub struct Meridian {
     // "global" that clients can bind to; the matching trait impls are in `handlers`.
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub dmabuf_state: DmabufState,
     pub _dmabuf_global: DmabufGlobal,
@@ -107,6 +126,8 @@ impl Meridian {
         let compositor_state = CompositorState::new::<Self>(&dh);
         // xdg_shell: turns surfaces into desktop windows ("toplevels") and popups.
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        // wlr-layer-shell: bar, dock and other desktop surfaces (handlers/layer_shell.rs).
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         // wl_shm: clients share pixel buffers through shared memory (CPU rendering).
         let shm_state = ShmState::new::<Self>(&dh, backend.renderer().shm_formats());
         // linux-dmabuf: clients share GPU buffers. Anything using OpenGL/Vulkan
@@ -149,11 +170,16 @@ impl Meridian {
             windows: Vec::new(),
             layout,
             popups: PopupManager::default(),
+            focused_surface: None,
             cursor_status: CursorImageStatus::default_named(),
             resize: None,
+            ipc: IpcServer::default(),
+            next_window_id: 1,
+            ipc_socket: None,
             suppressed_keys: Vec::new(),
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             shm_state,
             dmabuf_state,
             _dmabuf_global: dmabuf_global,
@@ -174,14 +200,58 @@ impl Meridian {
             .cloned() // `Window` is a cheap reference-counted handle
     }
 
+    /// The layer surface (bar, dock, ...) under a point, looking only at the
+    /// given layers. Also returns the exact surface and its global position.
+    fn layer_under(
+        &self,
+        pos: Point<f64, Logical>,
+        layers: &[Layer],
+    ) -> Option<(LayerSurface, WlSurface, Point<f64, Logical>)> {
+        let output = self.space.output_under(pos).next()?;
+        let output_loc = self.space.output_geometry(output)?.loc;
+        let map = layer_map_for_output(output);
+        // Layer positions are relative to their output.
+        let local = pos - output_loc.to_f64();
+
+        layers.iter().find_map(|layer| {
+            let surface = map.layer_under(*layer, local)?;
+            let layer_loc = map.layer_geometry(surface)?.loc;
+            let (wl_surface, surface_loc) =
+                surface.surface_under(local - layer_loc.to_f64(), WindowSurfaceType::ALL)?;
+            Some((surface.clone(), wl_surface, (surface_loc + layer_loc + output_loc).to_f64()))
+        })
+    }
+
+    /// The layer surface a click at `pos` would hit, if it is not covered by a window.
+    pub fn layer_surface_under(&self, pos: Point<f64, Logical>) -> Option<LayerSurface> {
+        if let Some((layer, ..)) = self.layer_under(pos, &[Layer::Overlay, Layer::Top]) {
+            return Some(layer);
+        }
+        if self.space.element_under(pos).is_some() {
+            return None;
+        }
+        self.layer_under(pos, &[Layer::Bottom, Layer::Background])
+            .map(|(layer, ..)| layer)
+    }
+
     /// The surface under a point, with that surface's position in the space.
-    /// A window consists of several surfaces (popups, subsurfaces), hence the
-    /// second lookup inside the window.
+    /// Stacking order, top to bottom: overlay and top layers (bar, dock),
+    /// windows, then bottom and background layers (wallpaper).
     pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
-        let (window, window_loc) = self.space.element_under(pos)?;
-        window
-            .surface_under(pos - window_loc.to_f64(), WindowSurfaceType::ALL)
-            .map(|(surface, surface_loc)| (surface, (surface_loc + window_loc).to_f64()))
+        if let Some((_, surface, loc)) = self.layer_under(pos, &[Layer::Overlay, Layer::Top]) {
+            return Some((surface, loc));
+        }
+
+        // A window consists of several surfaces (popups, subsurfaces), hence
+        // the second lookup inside the window.
+        if let Some((window, window_loc)) = self.space.element_under(pos) {
+            return window
+                .surface_under(pos - window_loc.to_f64(), WindowSurfaceType::ALL)
+                .map(|(surface, surface_loc)| (surface, (surface_loc + window_loc).to_f64()));
+        }
+
+        self.layer_under(pos, &[Layer::Bottom, Layer::Background])
+            .map(|(_, surface, loc)| (surface, loc))
     }
 
     /// Give `window` keyboard focus and raise it; `None` clears the focus.
@@ -215,8 +285,7 @@ impl Meridian {
 
     /// The window that currently has keyboard focus.
     pub fn focused_window(&self) -> Option<Window> {
-        let focus = self.seat.get_keyboard()?.current_focus()?;
-        self.window_for_surface(&focus)
+        self.window_for_surface(self.focused_surface.as_ref()?)
     }
 
     /// Focus the next (`step = 1`) or previous (`step = -1`) window.
@@ -239,11 +308,20 @@ impl Meridian {
 
     // ---- layout -----------------------------------------------------------
 
-    /// The area windows may use: for now the whole first monitor.
-    /// The bar and dock will reserve their share in phase 3.
-    pub fn usable_area(&self) -> Option<Rect> {
+    /// The whole first monitor.
+    pub fn output_area(&self) -> Option<Rect> {
         let output = self.space.outputs().next()?;
         self.space.output_geometry(output)
+    }
+
+    /// The part of the first monitor that windows may use: everything not
+    /// reserved by the bar, dock or other layer surfaces.
+    pub fn usable_area(&self) -> Option<Rect> {
+        let output = self.space.outputs().next()?;
+        let output_geo = self.space.output_geometry(output)?;
+        let mut area = layer_map_for_output(output).non_exclusive_zone();
+        area.loc += output_geo.loc; // the zone is relative to the output
+        Some(area)
     }
 
     /// True when the layout decides window positions (so the user cannot drag them).
@@ -253,6 +331,11 @@ impl Meridian {
 
     /// Ask the active layout where windows go, and move/resize them accordingly.
     pub fn apply_layout(&mut self) {
+        // Monitor sizes may have changed: let bars and docks re-anchor first.
+        for output in self.space.outputs() {
+            layer_map_for_output(output).arrange();
+        }
+
         let Some(area) = self.usable_area() else { return };
         let Some(rects) = self.layout.arrange(area, self.windows.len()) else {
             return; // floating: nothing to do
@@ -294,6 +377,7 @@ impl Meridian {
             }
         }
         self.apply_layout();
+        self.ipc_broadcast();
     }
 
     // ---- actions ----------------------------------------------------------
@@ -323,6 +407,7 @@ impl Meridian {
                 };
                 self.set_layout(next);
             }
+            Action::Screenshot => self.screenshot(),
             Action::FocusNext => self.focus_step(1),
             Action::FocusPrevious => self.focus_step(-1),
         }
@@ -330,15 +415,18 @@ impl Meridian {
 
     /// Start a program as a client of this compositor.
     pub fn spawn(&self, program: &str, args: &[String]) {
-        let child = Command::new(program)
+        let mut command = Command::new(resolve_program(program));
+        command
             .args(args)
             .env("WAYLAND_DISPLAY", &self.socket_name)
             // We have no X server yet (phase 4); without this, X11-capable apps
             // would open on the host desktop instead.
-            .env_remove("DISPLAY")
-            .spawn();
+            .env_remove("DISPLAY");
+        if let Some(socket) = &self.ipc_socket {
+            command.env(meridian_common::ipc::SOCKET_ENV, socket);
+        }
 
-        match child {
+        match command.spawn() {
             // Wait for the child on a helper thread so it does not linger as a zombie.
             Ok(mut child) => {
                 std::thread::spawn(move || {
@@ -346,6 +434,30 @@ impl Meridian {
                 });
             }
             Err(err) => tracing::error!("could not start `{program}`: {err}"),
+        }
+    }
+
+    /// Start the programs listed under `autostart` in the config.
+    pub fn autostart(&self) {
+        for command_line in &self.config.autostart {
+            let mut parts = command_line.split_whitespace().map(String::from);
+            if let Some(program) = parts.next() {
+                let args: Vec<String> = parts.collect();
+                self.spawn(&program, &args);
+            }
+        }
+    }
+
+    /// Save a picture of the first monitor to ~/Pictures/Screenshots.
+    fn screenshot(&mut self) {
+        let Some(output) = self.space.outputs().next().cloned() else { return };
+        let Some(path) = screenshot_path() else {
+            tracing::error!("screenshot: cannot find your Pictures folder");
+            return;
+        };
+        match crate::backend::screenshot(self.backend.renderer(), &self.space, &output, &path) {
+            Ok(()) => tracing::info!("screenshot saved to {}", path.display()),
+            Err(err) => tracing::error!("screenshot failed: {err:#}"),
         }
     }
 
@@ -369,6 +481,13 @@ impl Meridian {
         for window in self.space.elements_for_output(output) {
             window.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
         }
+        {
+            let mut layers = layer_map_for_output(output);
+            for layer in layers.layers() {
+                layer.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+            }
+            layers.cleanup(); // forget closed layer surfaces
+        }
         if let CursorImageStatus::Surface(surface) = &self.cursor_status {
             send_frames_surface_tree(surface, output, elapsed, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
@@ -389,6 +508,33 @@ const TILED_STATES: [xdg_toplevel::State; 4] = [
     xdg_toplevel::State::TiledTop,
     xdg_toplevel::State::TiledBottom,
 ];
+
+/// Prefer a Meridian program sitting next to our own binary. That makes
+/// `cargo run` use the freshly built bar and dock instead of installed ones.
+fn resolve_program(program: &str) -> PathBuf {
+    if !program.contains('/')
+        && let Ok(exe) = std::env::current_exe()
+        && let Some(sibling) = exe.parent().map(|dir| dir.join(program))
+        && sibling.is_file()
+    {
+        return sibling;
+    }
+    PathBuf::from(program)
+}
+
+/// `~/Pictures/Screenshots/meridian-<unix time>.png`, creating the folder.
+fn screenshot_path() -> Option<PathBuf> {
+    let pictures = std::env::var_os("XDG_PICTURES_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Pictures")))?;
+    let dir = pictures.join("Screenshots");
+    std::fs::create_dir_all(&dir).ok()?;
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    Some(dir.join(format!("meridian-{seconds}.png")))
+}
 
 fn find_in_path(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;

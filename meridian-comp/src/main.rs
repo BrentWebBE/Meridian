@@ -16,6 +16,7 @@ mod cursor;
 mod grabs;
 mod handlers;
 mod input;
+mod ipc;
 mod keys;
 mod layout;
 mod state;
@@ -107,6 +108,12 @@ fn main() -> anyhow::Result<()> {
         "Meridian is running. Start clients with WAYLAND_DISPLAY={}",
         state.socket_name.to_string_lossy()
     );
+
+    match state.init_ipc() {
+        Ok(path) => state.ipc_socket = Some(path),
+        Err(err) => tracing::error!("IPC is unavailable, bar and dock will be limited: {err:#}"),
+    }
+    state.autostart();
 
     if let Some((program, rest)) = args.split_first() {
         state.spawn(program, rest);

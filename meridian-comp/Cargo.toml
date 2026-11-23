@@ -12,6 +12,7 @@ meridian-common.workspace = true
 smithay.workspace = true
 smithay-drm-extras.workspace = true
 xcursor.workspace = true
+png.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

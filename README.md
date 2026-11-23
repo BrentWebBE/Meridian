@@ -4,10 +4,10 @@ A Wayland desktop environment and window manager for Arch Linux, written in Rust
 on top of [Smithay](https://github.com/Smithay/smithay). The goal: the structure
 of macOS (global menu bar, dock, overview) with the friendliness of Zorin OS.
 
-**Status: phase 2 of 6.** The compositor runs nested in a window or as a real
-session from a TTY, with configurable keybindings and floating/tiled layouts.
-There is no bar, dock or launcher yet. The real-session backend is new and has
-had little hardware testing.
+**Status: phase 3 of 6.** The compositor runs nested in a window or as a real
+session from a TTY, with configurable keybindings, floating/tiled layouts, a
+top bar and a dock. There is no launcher or notification daemon yet. The
+real-session backend is new and has had little hardware testing.
 
 ![Target design](docs/design/top-bar-dock-layout-switcher.png)
 
@@ -46,6 +46,7 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 | Mod+Tab              | focus next window (Shift: previous) |
 | Mod+left-drag        | move a window                       |
 | Mod+right-drag       | resize a window                     |
+| Print                | screenshot to ~/Pictures/Screenshots |
 | Mod+Shift+E          | quit                                |
 | Ctrl+Alt+F1..F12     | switch virtual terminal             |
 
@@ -56,18 +57,24 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 Copy `/usr/share/doc/meridian-git/config.toml` (or
 `meridian-common/resources/default-config.toml`) to
 `~/.config/meridian/config.toml`. It covers the start layout, terminal,
-keyboard layout, output scale, tiling gaps and keybindings. Restart Meridian
-to apply changes.
+autostart programs, keyboard layout, output scale, tiling gaps, pinned dock
+apps and keybindings. Restart Meridian to apply changes.
 
 ## Layout
 
-| Crate             | Purpose                                 |
-|-------------------|-----------------------------------------|
-| `meridian-comp`   | the compositor                          |
-| `meridian-common` | shared config and theme tokens          |
+| Crate             | Purpose                                              |
+|-------------------|------------------------------------------------------|
+| `meridian-comp`   | the compositor                                       |
+| `meridian-bar`    | top bar (GTK 4, layer-shell)                         |
+| `meridian-dock`   | dock (GTK 4, layer-shell)                            |
+| `meridian-common` | shared config, theme tokens and the IPC protocol     |
 
-The bar, dock, launcher, notification daemon and settings app are added as
-separate crates in later phases.
+The bar and dock are ordinary Wayland clients. They learn about windows from
+the compositor over a small JSON socket (`$MERIDIAN_SOCKET`, see
+`meridian-common/src/ipc.rs`). The launcher, notification daemon and settings
+app are added as separate crates in later phases.
+
+Building needs `gtk4` and `gtk4-layer-shell` installed (`makepkg -s` does that).
 
 ## License
 

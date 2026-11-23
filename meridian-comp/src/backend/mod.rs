@@ -140,3 +140,53 @@ pub fn output_elements(
 
     elements
 }
+
+/// Draw `output` into an off-screen texture and save it as a PNG.
+pub fn screenshot(
+    renderer: &mut GlesRenderer,
+    space: &Space<Window>,
+    output: &Output,
+    path: &std::path::Path,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use smithay::{
+        backend::{
+            allocator::Fourcc,
+            renderer::{Bind, ExportMem, Offscreen, damage::OutputDamageTracker, gles::GlesTexture},
+        },
+        utils::{Rectangle, Transform},
+    };
+
+    let mode = output.current_mode().context("output has no mode")?;
+    let (width, height) = (mode.size.w, mode.size.h);
+    let scale = output.current_scale().fractional_scale();
+    let background = meridian_common::theme::LIGHT.desktop_background.to_array();
+
+    let elements = output_elements(renderer, space, output, None);
+
+    let mut texture: GlesTexture = renderer
+        .create_buffer(Fourcc::Abgr8888, (width, height).into())
+        .context("cannot create the off-screen buffer")?;
+
+    let pixels = {
+        let mut framebuffer = renderer.bind(&mut texture).context("cannot bind the buffer")?;
+        // A fresh damage tracker with a normal transform: draw everything, upright.
+        let mut tracker = OutputDamageTracker::new((width, height), scale, Transform::Normal);
+        tracker
+            .render_output(renderer, &mut framebuffer, 0, &elements, background)
+            .map_err(|err| anyhow::anyhow!("render failed: {err}"))?;
+
+        let region = Rectangle::from_size((width, height).into());
+        let mapping = renderer
+            .copy_framebuffer(&framebuffer, region, Fourcc::Abgr8888)
+            .context("cannot read the pixels back")?;
+        renderer.map_texture(&mapping).context("cannot map the pixels")?.to_vec()
+    };
+
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = png::Encoder::new(file, width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header()?.write_image_data(&pixels)?;
+    Ok(())
+}

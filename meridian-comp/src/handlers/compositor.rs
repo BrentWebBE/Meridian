@@ -48,6 +48,7 @@ impl CompositorHandler for Meridian {
         }
 
         xdg_shell::handle_commit(self, surface);
+        self.layer_commit(surface);
     }
 }
 

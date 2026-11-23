@@ -1,10 +1,10 @@
 # Meridian workspace. Each desktop component is its own crate (added phase by phase).
 [workspace]
 resolver = "3"
-members = ["meridian-common", "meridian-comp"]
+members = ["meridian-common", "meridian-comp", "meridian-bar", "meridian-dock"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -15,8 +15,14 @@ repository = "https://github.com/BrentWebBE/Patina"
 [workspace.dependencies]
 meridian-common = { path = "meridian-common" }
 anyhow = "1.0.100"
+# GTK 4 for the shell programs; `package` lets us write `gtk::` instead of `gtk4::`.
+gtk = { package = "gtk4", version = "0.11.5", features = ["v4_12"] }
+glib-unix = "0.22.8"
+gtk4-layer-shell = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.8"
+serde_json = "1.0.145"
+png = "0.18.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 xcursor = "0.3.10"
