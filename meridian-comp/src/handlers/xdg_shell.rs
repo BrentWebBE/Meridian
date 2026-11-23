@@ -33,6 +33,7 @@ impl XdgShellHandler for Meridian {
 
         self.space.map_element(window.clone(), location, false);
         self.ipc_register_window(&window);
+        self.window_space(&window); // joins the active space
         self.windows.push(window.clone());
         self.apply_layout();
         self.focus_window(Some(&window));

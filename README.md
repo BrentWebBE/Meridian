@@ -4,13 +4,15 @@ A Wayland desktop environment and window manager for Arch Linux, written in Rust
 on top of [Smithay](https://github.com/Smithay/smithay). The goal: the structure
 of macOS (global menu bar, dock, overview) with the friendliness of Zorin OS.
 
-**Status: phase 4 of 6.** The compositor runs nested in a window or as a real
-session from a TTY, with configurable keybindings, floating/tiled layouts, a
-top bar, a dock, an app menu and notifications. Window shadows, the overview
-and the settings app are still to come. The real-session backend is new and
-has had little hardware testing.
+**Status: phase 5 of 6.** The compositor runs nested in a window or as a real
+session from a TTY. It has rounded windows with shadows, four spaces, an
+overview, a top bar, an optional dock, the Find launcher and notifications.
+The settings app, lock screen and desktop icons are still to come. The
+real-session backend is new and has had little hardware testing.
 
-![Target design](docs/design/top-bar-dock-layout-switcher.png)
+![Meridian running nested](docs/design/phase-5-desktop.png)
+
+The look follows the "Terra" mockups in `docs/design/`.
 
 ## Install (Arch Linux)
 
@@ -43,7 +45,9 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 |----------------------|-------------------------------------|
 | Mod+Return           | open a terminal                     |
 | Mod+Q                | close the focused window            |
-| Mod+Space            | open or close the app menu          |
+| Super (tap) or Mod+Space | open or close Find              |
+| Mod+O                | overview: thumbnails and spaces     |
+| Mod+1 .. Mod+4       | switch space (add Shift: move window) |
 | Mod+T                | toggle floating / tiled             |
 | Mod+Tab              | focus next window (Shift: previous) |
 | Mod+left-drag        | move a window                       |
@@ -69,7 +73,7 @@ apps and keybindings. Restart Meridian to apply changes.
 | `meridian-comp`   | the compositor                                       |
 | `meridian-bar`    | top bar (GTK 4, layer-shell)                         |
 | `meridian-dock`   | dock (GTK 4, layer-shell)                            |
-| `meridian-launcher` | app menu: search, pinned and all apps, power menu  |
+| `meridian-launcher` | Find: search apps and recent files, running apps, power |
 | `meridian-notify` | notification daemon (`org.freedesktop.Notifications`) |
 | `meridian-common` | shared config, theme tokens and the IPC protocol     |
 

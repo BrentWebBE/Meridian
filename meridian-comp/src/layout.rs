@@ -5,7 +5,7 @@
 //! keeps it easy to test and easy to add new layouts.
 
 use meridian_common::config::{Config, LayoutKind};
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Rectangle, Size};
 
 /// A rectangle in logical (scale-independent) screen coordinates.
 pub type Rect = Rectangle<i32, Logical>;
@@ -94,6 +94,38 @@ impl Layout for Tiled {
     }
 }
 
+/// Arrange thumbnails of windows with the given sizes in a grid inside
+/// `area`. Each window keeps its proportions and is never enlarged.
+/// Used by the overview.
+pub fn grid(area: Rect, sizes: &[Size<i32, Logical>], gap: i32) -> Vec<Rect> {
+    let count = sizes.len() as i32;
+    if count == 0 {
+        return Vec::new();
+    }
+    // As square as possible: 1 -> 1x1, 2 -> 2x1, 5 -> 3x2, ...
+    let columns = (count as f64).sqrt().ceil() as i32;
+    let rows = (count + columns - 1) / columns;
+    let cell_w = ((area.size.w - gap * (columns - 1)) / columns).max(1);
+    let cell_h = ((area.size.h - gap * (rows - 1)) / rows).max(1);
+
+    sizes
+        .iter()
+        .enumerate()
+        .map(|(index, size)| {
+            let (column, row) = (index as i32 % columns, index as i32 / columns);
+            let scale = (cell_w as f64 / size.w.max(1) as f64)
+                .min(cell_h as f64 / size.h.max(1) as f64)
+                .min(1.0);
+            let w = ((size.w as f64 * scale) as i32).max(1);
+            let h = ((size.h as f64 * scale) as i32).max(1);
+            // Center the thumbnail in its cell.
+            let x = area.loc.x + column * (cell_w + gap) + (cell_w - w) / 2;
+            let y = area.loc.y + row * (cell_h + gap) + (cell_h - h) / 2;
+            Rect::new((x, y).into(), (w, h).into())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +170,33 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn grid_keeps_proportions_and_fits() {
+        let sizes = vec![Size::from((800, 600)); 5];
+        let rects = grid(area(), &sizes, 20);
+        assert_eq!(rects.len(), 5);
+        for (i, a) in rects.iter().enumerate() {
+            assert!(area().contains_rect(*a), "{a:?} outside the area");
+            // 4:3 stays 4:3 (within rounding).
+            assert!((a.size.w * 3 - a.size.h * 4).abs() <= 4, "{a:?} lost its proportions");
+            for b in &rects[i + 1..] {
+                assert!(!a.overlaps(*b), "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn grid_never_enlarges_small_windows() {
+        let rects = grid(area(), &[Size::from((200, 100))], 20);
+        assert_eq!(rects[0].size, Size::from((200, 100)));
+        // Centered in the area.
+        assert_eq!(rects[0].loc, (400, 250).into());
+    }
+
+    #[test]
+    fn grid_of_nothing_is_empty() {
+        assert!(grid(area(), &[], 20).is_empty());
     }
 }

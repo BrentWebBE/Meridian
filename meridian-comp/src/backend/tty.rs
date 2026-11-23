@@ -54,7 +54,7 @@ use smithay::{
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
-use super::{Backend, CursorFrame, OutputElement, output_elements};
+use super::{Backend, CursorFrame, OutputElement, Scene, output_elements};
 use crate::{cursor::Cursor, state::Meridian};
 
 // Type aliases: short names for long generic types.
@@ -402,7 +402,9 @@ impl Meridian {
     /// Draw one monitor, if it is ready for a new frame.
     fn tty_render(&mut self, crtc: crtc::Handle) {
         let pointer_location = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
-        let background = theme::LIGHT.desktop_background.to_array();
+        let background = theme::LIGHT.wallpaper.sky.to_array();
+        let focused = self.focused_window();
+        let overview = self.overview_scene();
 
         // `self.backend`, `self.space` and `self.cursor_status` are different
         // fields, so Rust lets us borrow one mutably and the others immutably
@@ -416,16 +418,18 @@ impl Meridian {
             return;
         }
 
-        let elements = output_elements(
-            &mut tty.renderer,
-            &self.space,
-            &surface.output,
-            Some(CursorFrame {
+        let scene = Scene {
+            space: &self.space,
+            effects: &self.effects,
+            focused,
+            overview,
+            cursor: Some(CursorFrame {
                 status: &self.cursor_status,
                 image: &tty.cursor,
                 location: pointer_location,
             }),
-        );
+        };
+        let elements = output_elements(&mut tty.renderer, &surface.output, &scene);
 
         // `FrameFlags::empty()`: always composite with OpenGL. Direct scanout
         // (handing client buffers straight to the monitor) is faster but is

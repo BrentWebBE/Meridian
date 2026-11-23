@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-bar"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-common"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-comp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "meridian-common",
@@ -1235,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-dock"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-launcher"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-notify"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-channel",
  "glib-unix",

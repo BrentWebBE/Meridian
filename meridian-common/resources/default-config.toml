@@ -12,7 +12,7 @@ layout = "floating"
 terminal = ""
 
 # Programs started together with Meridian. Set to [] for a bare compositor.
-autostart = ["meridian-bar", "meridian-dock", "meridian-notify"]
+autostart = ["meridian-bar", "meridian-dock", "meridian-notify", "meridian-launcher --background"]
 
 [keyboard]
 # XKB names, e.g. layout = "us", "be", "de". Empty = system default.
@@ -32,6 +32,8 @@ gap = 12              # pixels between tiled windows
 master-ratio = 0.55   # share of the width for the first window
 
 [dock]
+# "dock" = always visible at the bottom, "off" = no dock (use Find instead).
+mode = "dock"
 # Apps always shown in the dock, by desktop file id (the file name in
 # /usr/share/applications without ".desktop"). Missing apps are skipped.
 pinned = [
@@ -49,7 +51,9 @@ pinned = [
 # Key names are XKB keysym names (Return, Tab, space, a-z, F1, ...).
 #
 # Actions: "spawn-terminal", "close-window", "quit", "toggle-layout",
-# "focus-next", "focus-previous", "screenshot", or { spawn = "command with args" }.
+# "focus-next", "focus-previous", "screenshot", "toggle-overview",
+# { workspace = 2 }, { move-to-workspace = 2 }, { spawn = "command with args" }.
+
 [keybindings]
 "Mod+Return" = "spawn-terminal"
 "Mod+Q" = "close-window"
@@ -58,5 +62,15 @@ pinned = [
 "Mod+Tab" = "focus-next"
 "Mod+Shift+Tab" = "focus-previous"
 "Print" = "screenshot"
-# The launcher is a single program: starting it again closes it.
+# Find is a single program: starting it again closes it.
+# In a real session, tapping the Super key on its own opens it too.
 "Mod+space" = { spawn = "meridian-launcher" }
+"Mod+O" = "toggle-overview"
+"Mod+1" = { workspace = 1 }
+"Mod+2" = { workspace = 2 }
+"Mod+3" = { workspace = 3 }
+"Mod+4" = { workspace = 4 }
+"Mod+Shift+1" = { move-to-workspace = 1 }
+"Mod+Shift+2" = { move-to-workspace = 2 }
+"Mod+Shift+3" = { move-to-workspace = 3 }
+"Mod+Shift+4" = { move-to-workspace = 4 }

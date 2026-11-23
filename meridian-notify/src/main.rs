@@ -68,7 +68,7 @@ fn main() -> glib::ExitCode {
     });
 
     // No window is visible most of the time; keep running anyway.
-    let _keep_running = app.hold();
+    app.connect_startup(|app| std::mem::forget(app.hold()));
     app.connect_startup(quit_with_compositor);
     app.run()
 }

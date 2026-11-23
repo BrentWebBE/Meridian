@@ -99,7 +99,9 @@ impl Meridian {
             Request::FocusWindow { id } => {
                 let window = self.windows.iter().find(|w| window_id(w) == Some(id)).cloned();
                 if let Some(window) = window {
-                    self.focus_window(Some(&window));
+                    // It may be on another space, or hidden behind the overview.
+                    self.set_overview(false);
+                    self.show_window(&window);
                 }
             }
             Request::Action(action) => self.run_action(action),
@@ -127,6 +129,7 @@ impl Meridian {
                 })?;
                 Some(WindowInfo {
                     id: window_id(window)?,
+                    space: self.window_space(window) as u32,
                     app_id,
                     title,
                     focused: focused.as_ref() == Some(window),
@@ -137,6 +140,9 @@ impl Meridian {
         State {
             windows,
             layout: self.layout.kind(),
+            active_space: self.active_space as u32,
+            space_count: crate::overview::SPACE_COUNT as u32,
+            overview: self.overview,
         }
     }
 

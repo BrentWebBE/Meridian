@@ -7,16 +7,10 @@ window.dock-window {
 .dock {
   margin: 14px 18px 10px 18px;   /* room for the shadow */
   padding: 8px;
-  border-radius: 20px;
+  border-radius: 22px;
   background: var(--m-surface);
   border: 1px solid var(--m-border);
   box-shadow: 0 6px 18px var(--m-shadow);
-}
-
-.dock separator {
-  margin: 8px 6px;
-  min-width: 1px;
-  background: var(--m-border);
 }
 
 button.tile {
@@ -34,20 +28,6 @@ button.tile {
 
 button.tile:hover {
   background: var(--m-surface-hover);
-}
-
-button.tile.menu {
-  border: none;
-  background: var(--m-accent);
-  color: var(--m-on-accent);
-}
-
-button.tile.menu:hover {
-  background: color-mix(in srgb, var(--m-accent) 88%, black);
-}
-
-button.tile.menu image {
-  -gtk-icon-size: 22px;
 }
 
 /* The dot under a running app. */

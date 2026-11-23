@@ -4,7 +4,7 @@
 //! `/usr/share/applications` and `~/.local/share/applications`. GIO (part of
 //! GLib) parses them, including translations and the "hidden" flags.
 
-use gtk::{gio, glib, prelude::*};
+use gtk::{gio, prelude::*};
 
 pub struct AppEntry {
     /// Lowercase desktop file id without ".desktop".
@@ -54,23 +54,40 @@ pub fn installed() -> Vec<AppEntry> {
     entries
 }
 
-/// "Today", "Yesterday" or a short date, for the recent files list.
-pub fn relative_day(when: &glib::DateTime) -> String {
-    let Ok(now) = glib::DateTime::now_local() else {
-        return String::new();
-    };
-    let Ok(when) = when.to_local() else {
-        return String::new();
-    };
-    let same_day = |a: &glib::DateTime, b: &glib::DateTime| a.year() == b.year() && a.day_of_year() == b.day_of_year();
+/// A recently used file, for the "Files" section.
+pub struct RecentFile {
+    pub name: String,
+    /// The folder it is in, shown on the right ("Documents").
+    pub folder: String,
+    pub uri: String,
+}
 
-    if same_day(&now, &when) {
-        return "Today".into();
-    }
-    if now.add_days(-1).is_ok_and(|yesterday| same_day(&yesterday, &when)) {
-        return "Yesterday".into();
-    }
-    when.format("%-e %b").map(|text| text.to_string()).unwrap_or_default()
+/// Recently used files whose name matches the query, newest first.
+///
+/// This is not a full file search: it only knows files that some
+/// application has opened or saved (GTK's shared "recent files" list).
+pub fn recent_files(query: &str, limit: usize) -> Vec<RecentFile> {
+    let mut items = gtk::RecentManager::default().items();
+    items.retain(|item| item.exists() && matches(&item.display_name().to_lowercase(), query));
+    items.sort_by_key(|item| std::cmp::Reverse(item.modified().to_unix()));
+
+    items
+        .into_iter()
+        .take(limit)
+        .map(|item| {
+            let uri = item.uri().to_string();
+            let folder = gio::File::for_uri(&uri)
+                .parent()
+                .and_then(|parent| parent.basename())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            RecentFile {
+                name: item.display_name().to_string(),
+                folder,
+                uri,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

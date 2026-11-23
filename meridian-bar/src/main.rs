@@ -44,11 +44,12 @@ fn build_ui(app: &gtk::Application) {
     window.auto_exclusive_zone_enable();
 
     // ---- left: menu button and focused app --------------------------------
+    // The round logo button opens Find.
     let menu_button = gtk::Button::builder()
-        .icon_name("view-app-grid-symbolic")
+        .label("M")
         .css_classes(["menu"])
         .valign(gtk::Align::Center)
-        .tooltip_text("Apps")
+        .tooltip_text("Find apps and files")
         .build();
     menu_button.connect_clicked(|_| open_launcher());
     let app_name = gtk::Label::builder().label("Desktop").css_classes(["app-name"]).build();
@@ -67,7 +68,16 @@ fn build_ui(app: &gtk::Application) {
     right.append(&clock);
 
     let content = gtk::CenterBox::builder().css_classes(["bar-content"]).build();
+    // ---- center: one pill per space (virtual desktop) -------------------
+    let spaces = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .css_classes(["spaces"])
+        .valign(gtk::Align::Center)
+        .build();
+
     content.set_start_widget(Some(&left));
+    content.set_center_widget(Some(&spaces));
     content.set_end_widget(Some(&right));
     window.set_child(Some(&content));
 
@@ -104,7 +114,7 @@ fn build_ui(app: &gtk::Application) {
         ),
     );
 
-    watch_compositor(app_name);
+    watch_compositor(app_name, spaces);
 
     window.present();
 }
@@ -160,18 +170,46 @@ fn read_battery() -> Option<(u32, bool)> {
     None
 }
 
-/// Ask the compositor to start (or toggle) the app menu. Going through the
-/// compositor means the menu gets the same environment as other programs.
+/// Ask the compositor to start (or toggle) Find. Going through the
+/// compositor means it gets the same environment as other programs.
 fn open_launcher() {
-    let request = Request::Action(Action::Spawn("meridian-launcher".into()));
-    let sent = Connection::connect().and_then(|mut connection| connection.send(&request));
+    send(&Request::Action(Action::Spawn("meridian-launcher".into())));
+}
+
+/// Send one request to the compositor.
+fn send(request: &Request) {
+    let sent = Connection::connect().and_then(|mut connection| connection.send(request));
     if let Err(err) = sent {
         eprintln!("meridian-bar: could not reach the compositor: {err}");
     }
 }
 
-/// Show the focused application's name, as reported by the compositor.
-fn watch_compositor(app_name: gtk::Label) {
+/// Rebuild the space pills: "1 2 3 4", the active one filled in.
+fn show_spaces(spaces: &gtk::Box, state: &State) {
+    while let Some(child) = spaces.first_child() {
+        spaces.remove(&child);
+    }
+    for index in 0..state.space_count {
+        let number = index + 1;
+        let pill = gtk::Button::builder()
+            .label(number.to_string())
+            .css_classes(["space"])
+            .tooltip_text(format!("Space {number}"))
+            .build();
+        if index == state.active_space {
+            pill.add_css_class("active");
+        }
+        // A dot of emphasis for spaces that have windows.
+        if state.windows.iter().any(|window| window.space == index) {
+            pill.add_css_class("occupied");
+        }
+        pill.connect_clicked(move |_| send(&Request::Action(Action::Workspace(number as u8))));
+        spaces.append(&pill);
+    }
+}
+
+/// Show the focused application's name and the spaces, as reported by the compositor.
+fn watch_compositor(app_name: gtk::Label, spaces: gtk::Box) {
     let connection = match Connection::connect() {
         Ok(connection) => connection,
         Err(err) => {
@@ -191,6 +229,7 @@ fn watch_compositor(app_name: gtk::Label) {
                 // Only the newest snapshot matters.
                 if let Some(state) = states.last() {
                     app_name.set_label(&focused_app_name(state));
+                    show_spaces(&spaces, state);
                 }
                 glib::ControlFlow::Continue
             }
