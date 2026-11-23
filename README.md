@@ -120,6 +120,7 @@ running-dots = true
 | `meridian-launcher` | Find: search apps and recent files, running apps, power |
 | `meridian-notify` | notification daemon (`org.freedesktop.Notifications`) |
 | `meridian-settings` | Settings app: Appearance and Launching apps         |
+| `meridian-desktop` | desktop icons: Home, Documents, Projects, Trash      |
 | `meridian-common` | shared config, theme tokens and the IPC protocol     |
 
 The shell programs are ordinary Wayland clients. They learn about windows from

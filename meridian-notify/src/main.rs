@@ -34,7 +34,7 @@ use crate::server::{CloseReason, Event, Notification};
 const DEFAULT_TIMEOUT_MS: u32 = 5000;
 /// Older popups are dropped beyond this many.
 const MAX_VISIBLE: usize = 5;
-const CARD_WIDTH: i32 = 340;
+const CARD_WIDTH: i32 = 320;
 
 fn main() -> glib::ExitCode {
     // Take the bus name before starting GTK: if another notification daemon
