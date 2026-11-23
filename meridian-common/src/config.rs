@@ -131,6 +131,8 @@ pub enum Action {
     Workspace(u8),
     /// Send the focused window to a space, counted from 1.
     MoveToWorkspace(u8),
+    /// Give the dock the keyboard, to pick an app with arrows and Enter.
+    FocusDock,
     /// Run a command line (split on whitespace, no shell).
     Spawn(String),
 }

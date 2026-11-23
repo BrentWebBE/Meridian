@@ -64,6 +64,8 @@ pub enum Request {
     Action(Action),
     /// The config file changed: read it again and apply it.
     ReloadConfig,
+    /// A shell program is done with the keyboard: give it back to the top window.
+    ReturnFocus,
 }
 
 /// Where the compositor for Wayland display `wayland_display` listens.

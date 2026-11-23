@@ -478,6 +478,68 @@ impl Meridian {
         tracing::info!("configuration reloaded");
     }
 
+    /// Reload the config whenever its file changes, using inotify: the
+    /// kernel makes a file descriptor readable when something happens in a
+    /// watched folder, which fits the event loop like any other source.
+    pub fn watch_config_files(&mut self) {
+        use inotify::{Inotify, WatchMask};
+        let Some(folder) = Config::path().and_then(|path| path.parent().map(PathBuf::from)) else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(&folder);
+
+        let watch = || -> std::io::Result<Inotify> {
+            let inotify = Inotify::init()?;
+            // The folder, not the file: programs replace config files by
+            // renaming a new one into place, which a file watch would miss.
+            inotify
+                .watches()
+                .add(&folder, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO | WatchMask::DELETE)?;
+            Ok(inotify)
+        };
+        let inotify = match watch() {
+            Ok(inotify) => inotify,
+            Err(err) => {
+                tracing::warn!("cannot watch {}: {err}", folder.display());
+                return;
+            }
+        };
+
+        let inserted = self
+            .loop_handle
+            .insert_source(Generic::new(inotify, Interest::READ, Mode::Level), |_, inotify, state| {
+                let mut buffer = [0u8; 4096];
+                // Safety: we only read events; the inotify instance is not dropped.
+                let events = unsafe { inotify.get_mut() }.read_events(&mut buffer);
+                let ours = events.is_ok_and(|events| {
+                    events
+                        .filter_map(|event| event.name.map(|name| name.to_os_string()))
+                        .any(|name| name == "config.toml" || name == "themes.toml")
+                });
+                if ours {
+                    state.reload_config();
+                }
+                Ok(PostAction::Continue)
+            });
+        if inserted.is_err() {
+            tracing::warn!("cannot watch the config folder");
+        }
+    }
+
+    /// Give the keyboard to the layer surface with this namespace, if it
+    /// accepts keyboard focus.
+    fn focus_layer(&mut self, namespace: &str) {
+        let surface = self.space.outputs().find_map(|output| {
+            layer_map_for_output(output)
+                .layers()
+                .find(|layer| layer.namespace() == namespace && layer.can_receive_keyboard_focus())
+                .map(|layer| layer.wl_surface().clone())
+        });
+        if let (Some(surface), Some(keyboard)) = (surface, self.seat.get_keyboard()) {
+            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+        }
+    }
+
     /// Apply the mood for the current settings and time of day.
     pub fn update_theme(&mut self) {
         let mood = self.config.appearance.current_mood(current_hour());
@@ -579,6 +641,7 @@ impl Meridian {
                 self.set_layout(next);
             }
             Action::Screenshot => self.screenshot(),
+            Action::FocusDock => self.focus_layer("meridian-dock"),
             Action::ToggleOverview => self.set_overview(!self.overview),
             // Spaces are numbered from 1 in the config.
             Action::Workspace(number) => self.switch_space((number as usize).saturating_sub(1)),

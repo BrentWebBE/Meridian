@@ -5,7 +5,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use gtk::{gdk, glib};
+use gtk::{gdk, glib, prelude::*};
 
 use crate::{
     config::Config,
@@ -79,6 +79,48 @@ pub fn apply_mood(name: &str) {
             styles.apply(name);
         }
     });
+}
+
+/// The mood currently applied ("morning", "dusk" or "night").
+pub fn current_mood() -> String {
+    STYLES.with(|slot| slot.borrow().as_ref().map(|styles| styles.current()).unwrap_or_default())
+}
+
+/// Call `on_change` whenever the config file is written. The kernel's
+/// inotify tells GIO, GIO tells us: no polling. Editors and our own
+/// Settings app replace the file rather than modify it, so we watch the
+/// folder and look for the file's name.
+pub fn watch_config(on_change: impl Fn() + 'static) {
+    let Some(path) = Config::path() else { return };
+    let Some(folder) = path.parent() else { return };
+    let _ = std::fs::create_dir_all(folder);
+
+    let directory = gtk::gio::File::for_path(folder);
+    let monitor = match directory.monitor_directory(gtk::gio::FileMonitorFlags::NONE, gtk::gio::Cancellable::NONE) {
+        Ok(monitor) => monitor,
+        Err(err) => {
+            eprintln!("cannot watch {}: {err}", folder.display());
+            return;
+        }
+    };
+    monitor.connect_changed(move |_, file, _, event| {
+        use gtk::gio::FileMonitorEvent as Event;
+        let ours = file
+            .basename()
+            .is_some_and(|name| name.as_os_str() == "config.toml" || name.as_os_str() == "themes.toml");
+        // "ChangesDoneHint" marks the end of a write; "Renamed"/"MovedIn"
+        // is how an atomic replace shows up.
+        if ours && matches!(event, Event::ChangesDoneHint | Event::Renamed | Event::MovedIn | Event::Created) {
+            on_change();
+        }
+    });
+    // The monitor stops when dropped; it must live as long as the program.
+    std::mem::forget(monitor);
+}
+
+/// True if the user asked for reduced motion (GTK's animation setting).
+pub fn reduced_motion() -> bool {
+    gtk::Settings::default().is_some_and(|settings| !settings.is_gtk_enable_animations())
 }
 
 /// The hour of the day (0-23) in local time.

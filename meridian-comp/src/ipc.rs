@@ -106,6 +106,10 @@ impl Meridian {
             }
             Request::Action(action) => self.run_action(action),
             Request::ReloadConfig => self.reload_config(),
+            Request::ReturnFocus => {
+                let top = self.space.elements().next_back().cloned();
+                self.focus_window(top.as_ref());
+            }
         }
     }
 

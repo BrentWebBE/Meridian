@@ -47,6 +47,7 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 | Mod+Q                | close the focused window            |
 | Super (tap) or Mod+Space | open or close Find              |
 | Mod+O                | overview: thumbnails and spaces     |
+| Mod+D                | keyboard to the dock (arrows, Enter, Esc) |
 | Mod+1 .. Mod+4       | switch space (add Shift: move window) |
 | Mod+T                | toggle floating / tiled             |
 | Mod+Tab              | focus next window (Shift: previous) |
@@ -96,9 +97,18 @@ wallpaper = "~/Pictures/photo.jpg"   # optional; empty = the drawn landscape
 To change colors, copy `/usr/share/doc/meridian-git/themes.toml` to
 `~/.config/meridian/themes.toml` and edit the tokens you want.
 
-Apply changes without restarting: the Settings app will do this for you; until
-it exists, send `"reload-config"` to the socket in `$MERIDIAN_SOCKET`.
-Keyboard layout and output scale still need a restart.
+Changes apply as soon as the file is saved: the compositor and the shell
+programs watch it (inotify). The Settings app writes the same file. Keyboard
+layout and output scale still need a restart.
+
+### Launching apps
+
+```toml
+[dock]
+mode = "dock"          # "dock", "auto-hide" or "off" (Find only)
+position = "bottom"    # "bottom", "left" or "right"
+running-dots = true
+```
 
 ## Layout
 
@@ -109,6 +119,7 @@ Keyboard layout and output scale still need a restart.
 | `meridian-dock`   | dock (GTK 4, layer-shell)                            |
 | `meridian-launcher` | Find: search apps and recent files, running apps, power |
 | `meridian-notify` | notification daemon (`org.freedesktop.Notifications`) |
+| `meridian-settings` | Settings app: Appearance and Launching apps         |
 | `meridian-common` | shared config, theme tokens and the IPC protocol     |
 
 The shell programs are ordinary Wayland clients. They learn about windows from

@@ -8,10 +8,11 @@ members = [
     "meridian-dock",
     "meridian-launcher",
     "meridian-notify",
+    "meridian-settings",
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -27,6 +28,7 @@ gtk = { package = "gtk4", version = "0.11.5", features = ["v4_12"] }
 glib-unix = "0.22.8"
 zbus = "6.5.0"
 nucleo = "0.5.0"
+inotify = "0.11.5"
 async-channel = "2.5.0"
 gtk4-layer-shell = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }
