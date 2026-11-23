@@ -6,7 +6,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
-    config::Config,
+    config::{Action, Config},
     ipc::{Connection, Request, State},
     theme,
 };
@@ -158,9 +158,14 @@ impl Dock {
         let menu = gtk::Button::builder()
             .icon_name("view-app-grid-symbolic")
             .css_classes(["tile", "menu"])
-            .tooltip_text("Apps (coming with the launcher)")
+            .tooltip_text("Apps")
             .valign(gtk::Align::Start)
             .build();
+        let dock = Rc::clone(self);
+        menu.connect_clicked(move |_| {
+            // The compositor starts the app menu, or toggles it if it is open.
+            dock.send(&Request::Action(Action::Spawn("meridian-launcher".into())));
+        });
         self.row.append(&menu);
         self.row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
 
@@ -207,6 +212,14 @@ impl Dock {
         }
     }
 
+    fn send(&self, request: &Request) {
+        if let Some(connection) = &self.connection
+            && let Err(err) = connection.borrow_mut().send(request)
+        {
+            eprintln!("meridian-dock: could not reach the compositor: {err}");
+        }
+    }
+
     /// Click on an app: focus it if it runs (cycling through its windows),
     /// otherwise start it.
     fn activate(&self, info: Option<&gio::AppInfo>, windows: &[(u32, bool)]) {
@@ -214,12 +227,7 @@ impl Dock {
             // The window after the focused one, or the first.
             let focused = windows.iter().position(|(_, focused)| *focused);
             let next = focused.map_or(0, |index| (index + 1) % windows.len());
-            if let Some(connection) = &self.connection {
-                let request = Request::FocusWindow { id: windows[next].0 };
-                if let Err(err) = connection.borrow_mut().send(&request) {
-                    eprintln!("meridian-dock: could not reach the compositor: {err}");
-                }
-            }
+            self.send(&Request::FocusWindow { id: windows[next].0 });
         } else if let Some(info) = info
             && let Err(err) = info.launch(&[], None::<&gio::AppLaunchContext>)
         {

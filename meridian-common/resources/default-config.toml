@@ -12,7 +12,7 @@ layout = "floating"
 terminal = ""
 
 # Programs started together with Meridian. Set to [] for a bare compositor.
-autostart = ["meridian-bar", "meridian-dock"]
+autostart = ["meridian-bar", "meridian-dock", "meridian-notify"]
 
 [keyboard]
 # XKB names, e.g. layout = "us", "be", "de". Empty = system default.
@@ -58,3 +58,5 @@ pinned = [
 "Mod+Tab" = "focus-next"
 "Mod+Shift+Tab" = "focus-previous"
 "Print" = "screenshot"
+# The launcher is a single program: starting it again closes it.
+"Mod+space" = { spawn = "meridian-launcher" }

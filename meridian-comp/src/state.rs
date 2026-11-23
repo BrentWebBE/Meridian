@@ -419,8 +419,8 @@ impl Meridian {
         command
             .args(args)
             .env("WAYLAND_DISPLAY", &self.socket_name)
-            // We have no X server yet (phase 4); without this, X11-capable apps
-            // would open on the host desktop instead.
+            // We have no X server yet; without this, X11-capable apps would
+            // open on the host desktop instead.
             .env_remove("DISPLAY");
         if let Some(socket) = &self.ipc_socket {
             command.env(meridian_common::ipc::SOCKET_ENV, socket);

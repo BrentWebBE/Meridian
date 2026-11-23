@@ -10,7 +10,8 @@ use std::{cell::RefCell, rc::Rc};
 use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
-    ipc::{Connection, State},
+    config::Action,
+    ipc::{Connection, Request, State},
     theme,
 };
 
@@ -47,8 +48,9 @@ fn build_ui(app: &gtk::Application) {
         .icon_name("view-app-grid-symbolic")
         .css_classes(["menu"])
         .valign(gtk::Align::Center)
-        .tooltip_text("Apps (coming with the launcher)")
+        .tooltip_text("Apps")
         .build();
+    menu_button.connect_clicked(|_| open_launcher());
     let app_name = gtk::Label::builder().label("Desktop").css_classes(["app-name"]).build();
 
     let left = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -156,6 +158,16 @@ fn read_battery() -> Option<(u32, bool)> {
         return Some((percent.min(100), status.trim() == "Charging"));
     }
     None
+}
+
+/// Ask the compositor to start (or toggle) the app menu. Going through the
+/// compositor means the menu gets the same environment as other programs.
+fn open_launcher() {
+    let request = Request::Action(Action::Spawn("meridian-launcher".into()));
+    let sent = Connection::connect().and_then(|mut connection| connection.send(&request));
+    if let Err(err) = sent {
+        eprintln!("meridian-bar: could not reach the compositor: {err}");
+    }
 }
 
 /// Show the focused application's name, as reported by the compositor.

@@ -1,0 +1,16 @@
+[package]
+name = "meridian-notify"
+description = "The Meridian notification daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-common.workspace = true
+gtk.workspace = true
+gtk4-layer-shell.workspace = true
+glib-unix.workspace = true
+zbus.workspace = true
+async-channel.workspace = true
