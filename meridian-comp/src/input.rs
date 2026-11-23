@@ -8,7 +8,7 @@ use smithay::{
         KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent, InputTime,
     },
     input::{
-        keyboard::{FilterResult, keysyms},
+        keyboard::{FilterResult, Keysym, keysyms},
         pointer::{AxisFrame, ButtonEvent, GrabStartData, MotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
@@ -67,6 +67,17 @@ impl Meridian {
         // our filter. `Forward` sends the key to the focused client;
         // `Intercept(x)` keeps it from the client and returns `Some(x)` to us.
         let action = keyboard.input(self, keycode, key_state, serial, time, |state, modifiers, handle| {
+            // Tapping Super on its own (press and release with nothing in
+            // between) opens Find. Only in a real session: nested, the host
+            // desktop owns the Super key.
+            let is_super = matches!(handle.modified_sym(), Keysym::Super_L | Keysym::Super_R);
+            if key_state == KeyState::Pressed {
+                state.super_tap = is_super && state.backend.mod_is_logo();
+            } else if is_super && state.super_tap {
+                state.super_tap = false;
+                state.open_find_after_key = true;
+            }
+
             if key_state == KeyState::Released {
                 // Swallow the release of a key whose press we intercepted.
                 return match state.suppressed_keys.iter().position(|k| *k == keycode) {
@@ -96,6 +107,11 @@ impl Meridian {
                 None => FilterResult::Forward,
             }
         });
+
+        // Set inside the filter above; acted on here, where `self` is free again.
+        if std::mem::take(&mut self.open_find_after_key) {
+            self.run_action(Action::Spawn("meridian-launcher".into()));
+        }
 
         match action {
             Some(KeyAction::Run(action)) => self.run_action(action),
@@ -150,6 +166,17 @@ impl Meridian {
 
         let location = pointer.current_location();
         let on_layer = self.layer_surface_under(location);
+        // A mouse button between Super press and release means "Super+drag", not a tap.
+        self.super_tap = false;
+
+        // In the overview, clicks pick a thumbnail or a space instead of
+        // going to a client. Bar, dock and the search field still work.
+        if self.overview && on_layer.is_none() {
+            if event.state() == ButtonState::Pressed {
+                self.overview_click(location);
+            }
+            return;
+        }
 
         if event.state() == ButtonState::Pressed
             && !pointer.is_grabbed()

@@ -11,16 +11,19 @@ window.bar {
   padding: 0 10px;
 }
 
+/* The round logo button. */
 button.menu {
-  min-width: 22px;
+  min-width: 20px;
   min-height: 20px;
   padding: 0;
-  margin: 3px 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 99px;
   box-shadow: none;
   background: var(--m-accent);
   color: var(--m-on-accent);
+  font-family: serif;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 button.menu:hover {
@@ -29,6 +32,33 @@ button.menu:hover {
 
 .app-name {
   font-weight: 700;
+}
+
+/* Space pills in the middle of the bar. */
+button.space {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  box-shadow: none;
+  background: var(--m-surface-hover);
+  color: var(--m-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+button.space.occupied {
+  color: var(--m-text);
+}
+
+button.space:hover {
+  background: color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-hover));
+}
+
+button.space.active {
+  background: var(--m-accent);
+  color: var(--m-on-accent);
 }
 
 .status image {

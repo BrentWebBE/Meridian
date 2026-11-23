@@ -44,7 +44,8 @@ use smithay::{
 };
 
 use crate::{
-    backend::Backend,
+    backend::{Backend, Scene},
+    effects::Effects,
     grabs::ResizeState,
     ipc::IpcServer,
     keys::{self, Binding},
@@ -76,6 +77,16 @@ pub struct Meridian {
     /// The active layout, as a trait object (see layout.rs).
     pub layout: Box<dyn Layout>,
     pub popups: PopupManager,
+
+    /// Compiled shaders for rounded corners and shadows (effects.rs).
+    pub effects: Effects,
+    /// Index of the space (virtual desktop) being shown, see overview.rs.
+    pub active_space: usize,
+    /// True while the overview is open.
+    pub overview: bool,
+    /// Super was pressed and nothing else since: releasing it opens Find.
+    pub super_tap: bool,
+    pub open_find_after_key: bool,
 
     /// The surface with keyboard focus, kept up to date by `focus_changed`.
     /// We keep our own copy because Smithay holds the keyboard's lock while
@@ -153,6 +164,7 @@ impl Meridian {
             .context("failed to set up the keyboard: check [keyboard] in your config")?;
         seat.add_pointer();
 
+        let effects = Effects::compile(backend.renderer())?;
         let socket_name = init_wayland_socket(display, event_loop)?;
         let bindings = keys::parse_bindings(&config.keybindings, backend.mod_is_logo());
         let layout = layout::from_kind(config.layout, &config);
@@ -170,6 +182,11 @@ impl Meridian {
             windows: Vec::new(),
             layout,
             popups: PopupManager::default(),
+            effects,
+            active_space: 0,
+            overview: false,
+            super_tap: false,
+            open_find_after_key: false,
             focused_surface: None,
             cursor_status: CursorImageStatus::default_named(),
             resize: None,
@@ -242,6 +259,11 @@ impl Meridian {
             return Some((surface, loc));
         }
 
+        // In the overview windows are thumbnails; clients get no pointer input.
+        if self.overview {
+            return None;
+        }
+
         // A window consists of several surfaces (popups, subsurfaces), hence
         // the second lookup inside the window.
         if let Some((window, window_loc)) = self.space.element_under(pos) {
@@ -290,20 +312,21 @@ impl Meridian {
 
     /// Focus the next (`step = 1`) or previous (`step = -1`) window.
     fn focus_step(&mut self, step: isize) {
-        let count = self.windows.len() as isize;
+        // Only cycle through the windows of the space being shown.
+        let windows = self.space_windows(self.active_space);
+        let count = windows.len() as isize;
         if count == 0 {
             return;
         }
         let current = self
             .focused_window()
-            .and_then(|focused| self.windows.iter().position(|w| *w == focused));
+            .and_then(|focused| windows.iter().position(|w| *w == focused));
         let next = match current {
             // `rem_euclid` wraps around in both directions (-1 becomes count - 1).
             Some(index) => (index as isize + step).rem_euclid(count),
             None => 0,
         };
-        let window = self.windows[next as usize].clone();
-        self.focus_window(Some(&window));
+        self.focus_window(Some(&windows[next as usize]));
     }
 
     // ---- layout -----------------------------------------------------------
@@ -337,11 +360,13 @@ impl Meridian {
         }
 
         let Some(area) = self.usable_area() else { return };
-        let Some(rects) = self.layout.arrange(area, self.windows.len()) else {
+        // Each space is arranged on its own; parked spaces are left alone.
+        let windows = self.space_windows(self.active_space);
+        let Some(rects) = self.layout.arrange(area, windows.len()) else {
             return; // floating: nothing to do
         };
 
-        for (window, rect) in self.windows.iter().zip(rects) {
+        for (window, rect) in windows.iter().zip(rects) {
             if let Some(toplevel) = window.toplevel() {
                 // We cannot resize a client's window ourselves. We send the
                 // size we want in a configure event and the client redraws.
@@ -408,6 +433,10 @@ impl Meridian {
                 self.set_layout(next);
             }
             Action::Screenshot => self.screenshot(),
+            Action::ToggleOverview => self.set_overview(!self.overview),
+            // Spaces are numbered from 1 in the config.
+            Action::Workspace(number) => self.switch_space((number as usize).saturating_sub(1)),
+            Action::MoveToWorkspace(number) => self.move_focused_to_space((number as usize).saturating_sub(1)),
             Action::FocusNext => self.focus_step(1),
             Action::FocusPrevious => self.focus_step(-1),
         }
@@ -455,7 +484,14 @@ impl Meridian {
             tracing::error!("screenshot: cannot find your Pictures folder");
             return;
         };
-        match crate::backend::screenshot(self.backend.renderer(), &self.space, &output, &path) {
+        let scene = Scene {
+            space: &self.space,
+            effects: &self.effects,
+            focused: self.focused_window(),
+            overview: self.overview_scene(),
+            cursor: None,
+        };
+        match crate::backend::screenshot(self.backend.renderer(), &output, &scene, &path) {
             Ok(()) => tracing::info!("screenshot saved to {}", path.display()),
             Err(err) => tracing::error!("screenshot failed: {err:#}"),
         }

@@ -14,7 +14,7 @@ use smithay::{
     utils::{Rectangle, Transform},
 };
 
-use super::{Backend, output_elements};
+use super::{Backend, Scene, output_elements};
 use crate::state::Meridian;
 
 pub struct Winit {
@@ -63,7 +63,7 @@ pub fn attach(
 
     // Remembers what was drawn last frame so unchanged regions can be skipped.
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
-    let background = theme::LIGHT.desktop_background.to_array();
+    let background = theme::LIGHT.wallpaper.sky.to_array();
 
     // `move` transfers ownership of `output` and `damage_tracker` into the
     // closure, which then lives inside the event loop for the program's lifetime.
@@ -79,13 +79,24 @@ pub fn attach(
             }
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
+                // Computed first: these borrow all of `state`, which is not
+                // possible once `state.backend` is borrowed mutably below.
+                let focused = state.focused_window();
+                let overview = state.overview_scene();
                 let Backend::Winit(winit) = &mut state.backend else { return };
                 let size = winit.graphics.window_size();
 
                 let rendered = match winit.graphics.bind() {
                     Ok((renderer, mut framebuffer)) => {
                         // No cursor: the host desktop draws it over our window.
-                        let elements = output_elements(renderer, &state.space, &output, None);
+                        let scene = Scene {
+                            space: &state.space,
+                            effects: &state.effects,
+                            focused,
+                            overview,
+                            cursor: None,
+                        };
+                        let elements = output_elements(renderer, &output, &scene);
                         damage_tracker
                             // Buffer age 0 = redraw everything.
                             .render_output(renderer, &mut framebuffer, 0, &elements, background)

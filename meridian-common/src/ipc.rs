@@ -30,6 +30,8 @@ pub const SOCKET_ENV: &str = "MERIDIAN_SOCKET";
 pub struct WindowInfo {
     /// Stable for the lifetime of the window.
     pub id: u32,
+    /// Index of the space (virtual desktop) the window is on, from 0.
+    pub space: u32,
     /// The application's identifier, normally its desktop file id.
     pub app_id: String,
     pub title: String,
@@ -42,6 +44,11 @@ pub struct State {
     /// In the order the windows were opened.
     pub windows: Vec<WindowInfo>,
     pub layout: LayoutKind,
+    /// Index of the space being shown, from 0.
+    pub active_space: u32,
+    pub space_count: u32,
+    /// True while the overview is open.
+    pub overview: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

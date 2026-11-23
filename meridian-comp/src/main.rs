@@ -13,12 +13,14 @@
 
 mod backend;
 mod cursor;
+mod effects;
 mod grabs;
 mod handlers;
 mod input;
 mod ipc;
 mod keys;
 mod layout;
+mod overview;
 mod state;
 
 use anyhow::Context;

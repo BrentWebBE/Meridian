@@ -1,12 +1,13 @@
-//! Meridian's dock: a floating pill at the bottom with the menu button at its
-//! left end, pinned apps, and a dot under every app that is running.
+//! Meridian's dock: a floating pill at the bottom with the pinned apps and a
+//! dot under every app that is running. It can be switched off in the config
+//! (`[dock] mode = "off"`); Find then does the launching.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use meridian_common::{
-    config::{Action, Config},
+    config::{Config, DockMode},
     ipc::{Connection, Request, State},
     theme,
 };
@@ -36,6 +37,14 @@ struct Dock {
 }
 
 fn build_ui(app: &gtk::Application) {
+    let config = Config::load().unwrap_or_else(|err| {
+        eprintln!("meridian-dock: {err}; using defaults");
+        Config::default()
+    });
+    if config.dock.mode == DockMode::Off {
+        return; // no window: the application exits
+    }
+
     load_css();
 
     let window = gtk::ApplicationWindow::builder()
@@ -57,10 +66,6 @@ fn build_ui(app: &gtk::Application) {
         .build();
     window.set_child(Some(&row));
 
-    let config = Config::load().unwrap_or_else(|err| {
-        eprintln!("meridian-dock: {err}; using defaults");
-        Config::default()
-    });
 
     let installed = gio::AppInfo::all()
         .into_iter()
@@ -89,6 +94,9 @@ fn build_ui(app: &gtk::Application) {
     let empty = State {
         windows: Vec::new(),
         layout: config.layout,
+        active_space: 0,
+        space_count: 1,
+        overview: false,
     };
     dock.rebuild(&empty);
 
@@ -154,20 +162,6 @@ impl Dock {
         while let Some(child) = self.row.first_child() {
             self.row.remove(&child);
         }
-
-        let menu = gtk::Button::builder()
-            .icon_name("view-app-grid-symbolic")
-            .css_classes(["tile", "menu"])
-            .tooltip_text("Apps")
-            .valign(gtk::Align::Start)
-            .build();
-        let dock = Rc::clone(self);
-        menu.connect_clicked(move |_| {
-            // The compositor starts the app menu, or toggles it if it is open.
-            dock.send(&Request::Action(Action::Spawn("meridian-launcher".into())));
-        });
-        self.row.append(&menu);
-        self.row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
 
         for app in self.apps(state) {
             // Ids of this app's windows, and whether one of them is focused.

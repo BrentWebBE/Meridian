@@ -60,8 +60,18 @@ pub struct Tiled {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Dock {
+    pub mode: DockMode,
     /// Desktop file ids without ".desktop", e.g. "org.gnome.Nautilus".
     pub pinned: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DockMode {
+    /// Always visible at the bottom.
+    Dock,
+    /// No dock; launch with Find (Super).
+    Off,
 }
 
 /// What a keybinding does.
@@ -79,6 +89,12 @@ pub enum Action {
     FocusPrevious,
     /// Save a picture of the screen to ~/Pictures/Screenshots.
     Screenshot,
+    /// Show all windows as thumbnails, with the spaces strip and search.
+    ToggleOverview,
+    /// Switch to a space (virtual desktop), counted from 1.
+    Workspace(u8),
+    /// Send the focused window to a space, counted from 1.
+    MoveToWorkspace(u8),
     /// Run a command line (split on whitespace, no shell).
     Spawn(String),
 }
