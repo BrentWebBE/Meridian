@@ -16,7 +16,7 @@ pub const DEFAULT_THEMES: &str = include_str!("../resources/themes.toml");
 pub const BRAND: &str = "Terra";
 
 // Sizes in logical pixels.
-pub const BAR_HEIGHT: i32 = 28;
+pub const BAR_HEIGHT: i32 = 34;
 pub const DOCK_ICON_SIZE: i32 = 32;
 pub const WINDOW_RADIUS: i32 = 18;
 pub const PANEL_RADIUS: i32 = 26;

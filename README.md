@@ -50,8 +50,8 @@ choose the GPU with `MERIDIAN_DRM_DEVICE=/dev/dri/cardN`.
 | Mod+1 .. Mod+4       | switch space (add Shift: move window) |
 | Mod+T                | toggle floating / tiled             |
 | Mod+Tab              | focus next window (Shift: previous) |
-| Mod+left-drag        | move a window                       |
-| Mod+right-drag       | resize a window                     |
+| Mod+left-drag        | move a window (or drag its title bar) |
+| Mod+right-drag       | resize a window (or drag its border) |
 | Print                | screenshot to ~/Pictures/Screenshots |
 | Mod+Shift+E          | quit                                |
 | Ctrl+Alt+F1..F12     | switch virtual terminal             |

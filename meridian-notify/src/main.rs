@@ -15,7 +15,11 @@
 
 mod server;
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use gtk::{glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
@@ -62,6 +66,7 @@ fn main() -> glib::ExitCode {
                 match event {
                     Event::Show(notification) => popups.show(notification),
                     Event::Close(id) => popups.close(id, CloseReason::ClosedByCall),
+                    Event::MarkRead => popups.set_unread(0),
                 }
             }
         });
@@ -105,6 +110,8 @@ struct Popups {
     window: gtk::ApplicationWindow,
     stack: gtk::Box,
     cards: RefCell<HashMap<u32, Card>>,
+    /// Notifications that timed out without being clicked.
+    unread: Cell<u32>,
     connection: zbus::Connection,
 }
 
@@ -141,6 +148,7 @@ impl Popups {
             window,
             stack,
             cards: RefCell::new(HashMap::new()),
+            unread: Cell::new(0),
             connection,
         })
     }
@@ -220,9 +228,18 @@ impl Popups {
         self.window.present();
     }
 
+    fn set_unread(&self, unread: u32) {
+        self.unread.set(unread);
+        glib::spawn_future_local(server::emit_unread(self.connection.clone(), unread));
+    }
+
     /// Remove a popup and tell the application why, as the protocol requires.
     fn close(&self, id: u32, reason: CloseReason) {
         if self.remove(id) {
+            // It went away on its own: you may not have seen it.
+            if matches!(reason, CloseReason::Expired) {
+                self.set_unread(self.unread.get() + 1);
+            }
             // Sending is async; let it finish in the background of the main loop.
             glib::spawn_future_local(server::emit_closed(self.connection.clone(), id, reason));
         }

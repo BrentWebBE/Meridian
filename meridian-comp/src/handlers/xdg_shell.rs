@@ -29,7 +29,8 @@ impl XdgShellHandler for Meridian {
         // (A managed layout overrides this position right away.)
         let step = (self.windows.len() % 8) as i32;
         let origin = self.usable_area().map(|area| area.loc).unwrap_or_default();
-        let location = (origin.x + 48 + step * 32, origin.y + 48 + step * 32);
+        // Low enough that a title bar above the content stays below the top bar.
+        let location = (origin.x + 48 + step * 32, origin.y + 64 + step * 32);
 
         self.space.map_element(window.clone(), location, false);
         self.ipc_register_window(&window);
@@ -111,6 +112,21 @@ impl XdgShellHandler for Meridian {
         let Some(start_data) = click_start_data(&seat, wl_surface, serial) else { return };
         let Some(window) = self.window_for_surface(wl_surface) else { return };
         self.start_resize(window, edges.into(), start_data, serial);
+    }
+
+    // Clients that draw their own buttons ask us to change the window state.
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.client_maximize(surface.wl_surface(), true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.client_maximize(surface.wl_surface(), false);
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.minimize(&window);
+        }
     }
 
     // Popup grabs (menus that close when you click elsewhere) come later.

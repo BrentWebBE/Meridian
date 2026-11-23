@@ -13,6 +13,7 @@
 
 mod backend;
 mod cursor;
+mod decorations;
 mod effects;
 mod grabs;
 mod handlers;

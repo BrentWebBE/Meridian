@@ -1,50 +1,56 @@
-/* Colors come from meridian-common's theme tokens as --m-* variables. */
+/* Colors and fonts come from meridian-common's theme tokens as --m-* variables. */
 
 window.bar {
   background: var(--m-surface);
   color: var(--m-text);
   border-bottom: 1px solid var(--m-border);
+  font-family: var(--m-font-ui);
   font-size: 13px;
 }
 
 .bar-content {
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 /* The round logo button. */
 button.menu {
-  min-width: 20px;
-  min-height: 20px;
+  min-width: 22px;
+  min-height: 22px;
   padding: 0;
   border: none;
   border-radius: 99px;
   box-shadow: none;
   background: var(--m-accent);
   color: var(--m-on-accent);
-  font-family: serif;
-  font-size: 12px;
+  font-family: var(--m-font-display);
+  font-size: 13px;
   font-weight: 700;
 }
 
 button.menu:hover {
-  background: color-mix(in srgb, var(--m-accent) 88%, black);
+  background: color-mix(in srgb, var(--m-accent) 86%, var(--m-text));
 }
 
 .app-name {
   font-weight: 700;
 }
 
-/* Space pills in the middle of the bar. */
+.app-menu {
+  color: var(--m-text-muted);
+}
+
+/* Workspace markers: slightly irregular "pebbles". */
 button.space {
-  min-width: 20px;
-  min-height: 20px;
+  min-width: 24px;
+  min-height: 22px;
   padding: 0;
   border: none;
-  border-radius: 99px;
+  border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%;
   box-shadow: none;
   background: var(--m-surface-hover);
   color: var(--m-text-muted);
-  font-size: 11px;
+  font-family: var(--m-font-display);
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -53,7 +59,7 @@ button.space.occupied {
 }
 
 button.space:hover {
-  background: color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-hover));
+  background: color-mix(in srgb, var(--m-accent) 24%, var(--m-surface-hover));
 }
 
 button.space.active {
@@ -63,6 +69,34 @@ button.space.active {
 
 .status image {
   -gtk-icon-size: 16px;
+}
+
+button.bell {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--m-text);
+}
+
+button.bell:hover {
+  background: var(--m-surface-hover);
+}
+
+.unread-dot {
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 99px;
+  background: var(--m-accent);
+}
+
+/* Keyboard focus must be visible on every control. */
+button:focus-visible {
+  outline: 2px solid var(--m-accent);
+  outline-offset: 1px;
 }
 
 .clock {

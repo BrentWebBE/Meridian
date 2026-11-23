@@ -15,6 +15,7 @@ use smithay::{
 };
 
 use crate::{
+    decorations::{FrameHit, TitleButton},
     grabs::Edges,
     keys::{self, Modifiers},
     state::Meridian,
@@ -186,6 +187,41 @@ impl Meridian {
             // layer surface wants the keyboard (a launcher's search field).
             if layer.can_receive_keyboard_focus() {
                 keyboard.set_focus(self, Some(layer.wl_surface().clone()), serial);
+            }
+        } else if event.state() == ButtonState::Pressed
+            && !pointer.is_grabbed()
+            && let Some(hit) = self.frame_hit(location)
+        {
+            // A press on a title bar or border that we draw.
+            let start_data = GrabStartData {
+                focus: None,
+                button,
+                location,
+            };
+            match hit {
+                FrameHit::Titlebar(window) => {
+                    self.focus_window(Some(&window));
+                    if button == BTN_LEFT {
+                        self.start_move(window, start_data, serial);
+                    }
+                }
+                FrameHit::Edge(window, edges) => {
+                    self.focus_window(Some(&window));
+                    if button == BTN_LEFT {
+                        self.start_resize(window, edges, start_data, serial);
+                    }
+                }
+                FrameHit::Button(window, _) if button != BTN_LEFT => self.focus_window(Some(&window)),
+                FrameHit::Button(window, TitleButton::Close) => {
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.send_close();
+                    }
+                }
+                FrameHit::Button(window, TitleButton::Maximize) => {
+                    self.focus_window(Some(&window));
+                    self.toggle_maximize(&window);
+                }
+                FrameHit::Button(window, TitleButton::Minimize) => self.minimize(&window),
             }
         } else if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
             let window = self.space.element_under(location).map(|(w, _)| w.clone());

@@ -31,10 +31,14 @@ const MARGIN: i32 = 48;
 /// Where a window lives. Stored in the window's user data.
 /// `Cell` allows changing a value through a shared reference; fine here
 /// because everything runs on one thread.
-struct Placement {
+pub struct Placement {
     space: Cell<usize>,
     /// Position to restore when its space becomes active again.
     parked_at: Cell<Option<Point<i32, Logical>>>,
+    /// Hidden by its minimize button until asked for again.
+    pub minimized: Cell<bool>,
+    /// While maximized: the place and size to go back to.
+    pub restore: Cell<Option<Rect>>,
 }
 
 /// What the overview looks like right now. Used for drawing and for clicks,
@@ -55,10 +59,12 @@ pub struct SpaceTile {
 impl Meridian {
     // ---- spaces -----------------------------------------------------------
 
-    fn placement<'a>(&self, window: &'a Window) -> &'a Placement {
+    pub fn placement<'a>(&self, window: &'a Window) -> &'a Placement {
         window.user_data().get_or_insert(|| Placement {
             space: Cell::new(self.active_space),
             parked_at: Cell::new(None),
+            minimized: Cell::new(false),
+            restore: Cell::new(None),
         })
     }
 
@@ -68,16 +74,17 @@ impl Meridian {
     }
 
     /// The windows of one space, in the order they were opened.
+    /// Minimized windows are left out: they are not on screen.
     pub fn space_windows(&self, space: usize) -> Vec<Window> {
         self.windows
             .iter()
-            .filter(|window| self.window_space(window) == space)
+            .filter(|window| self.window_space(window) == space && !self.placement(window).minimized.get())
             .cloned()
             .collect()
     }
 
     /// Take a window off the screen, remembering where it was.
-    fn park(&mut self, window: &Window) {
+    pub fn park(&mut self, window: &Window) {
         let location = self.space.element_location(window);
         self.placement(window).parked_at.set(location);
         self.space.unmap_elem(window);
@@ -127,6 +134,14 @@ impl Meridian {
     /// Make `window` visible (switching space if needed) and focus it.
     pub fn show_window(&mut self, window: &Window) {
         self.switch_space(self.window_space(window));
+        // Bring a minimized window back to where it was.
+        let placement = self.placement(window);
+        if placement.minimized.replace(false) {
+            let origin = self.usable_area().map(|area| area.loc).unwrap_or_default();
+            let location = placement.parked_at.get().unwrap_or((origin.x + 48, origin.y + 90).into());
+            self.space.map_element(window.clone(), location, true);
+            self.apply_layout();
+        }
         self.focus_window(Some(window));
     }
 
