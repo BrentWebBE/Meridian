@@ -11,11 +11,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-repository = "https://github.com/BrentWebBE/Patina"
+repository = "https://github.com/BrentWebBE/Meridian"
 
 # Versions are declared once here; member crates say `foo.workspace = true`.
 # Cargo.lock (committed) records the exact resolved versions, like package-lock.json.
@@ -26,6 +26,7 @@ anyhow = "1.0.100"
 gtk = { package = "gtk4", version = "0.11.5", features = ["v4_12"] }
 glib-unix = "0.22.8"
 zbus = "6.5.0"
+nucleo = "0.5.0"
 async-channel = "2.5.0"
 gtk4-layer-shell = "0.9.0"
 serde = { version = "1.0.228", features = ["derive"] }

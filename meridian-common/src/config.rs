@@ -201,6 +201,9 @@ impl Config {
     }
 }
 
+/// A value that can be written to the config file: a string, number or boolean.
+pub type SettingValue = toml_edit::Value;
+
 /// Change one setting in the user's config file, keeping everything else
 /// (including comments) as it is. `section` is a table name such as "dock",
 /// or `None` for a top-level key. Used by the Settings app.

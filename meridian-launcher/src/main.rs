@@ -10,6 +10,9 @@
 //! at the top instead, leaving the window thumbnails clickable.
 
 mod apps;
+mod catalog;
+mod files;
+mod search;
 
 use std::{
     cell::{Cell, RefCell},
@@ -25,11 +28,25 @@ use meridian_common::{
     shell,
 };
 
-use crate::apps::AppEntry;
+use std::time::Duration;
 
-const PANEL_WIDTH: i32 = 580;
-const MAX_APPS: usize = 7;
-const MAX_FILES: usize = 3;
+use crate::{
+    apps::AppEntry,
+    catalog::Entry,
+    files::{FileHit, FileSearch},
+    search::Ranker,
+};
+
+const PANEL_WIDTH: i32 = 660;
+// How many results each group may show.
+const MAX_APPS: usize = 6;
+const MAX_ACTIONS: usize = 3;
+const MAX_SETTINGS: usize = 3;
+const MAX_FILES: usize = 5;
+/// The result list scrolls beyond this height (logical pixels).
+const MAX_LIST_HEIGHT: i32 = 430;
+/// Wait this long after the last keystroke before searching files.
+const FILE_SEARCH_DELAY: Duration = Duration::from_millis(120);
 
 /// The two looks of the launcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +92,9 @@ fn main() -> glib::ExitCode {
 #[derive(Clone)]
 enum Target {
     App(gio::AppInfo),
-    File(String), // a URI
+    File(std::path::PathBuf),
+    /// An action or a setting: just run it.
+    Run(Rc<dyn Fn()>),
 }
 
 /// Everything the callbacks share. `Rc<Ui>` is handed to each of them.
@@ -87,12 +106,23 @@ struct Ui {
     /// Divider + result list; hidden in the overview until you type.
     body: gtk::Box,
     results: gtk::Box,
+    scroller: gtk::ScrolledWindow,
     running: gtk::Box,
     footer: gtk::Stack,
 
     apps: Vec<AppEntry>,
+    actions: Vec<Entry>,
+    settings: Vec<Entry>,
     /// Lowercase desktop ids of the pinned apps, shown first.
     pinned: Vec<String>,
+    /// The fuzzy matcher. `RefCell` because matching needs `&mut`.
+    ranker: RefCell<Ranker>,
+    /// The file index on its worker thread.
+    files: FileSearch,
+    /// File results for the current query, once the worker has answered.
+    file_hits: RefCell<Vec<FileHit>>,
+    /// Counts query changes, so late answers to old queries can be ignored.
+    generation: Cell<u64>,
     /// The rows currently listed, top to bottom.
     rows: RefCell<Vec<(gtk::Button, Target)>>,
     selected: Cell<usize>,
@@ -122,7 +152,7 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
 
     // ---- search row -------------------------------------------------------
     let search = gtk::Entry::builder()
-        .placeholder_text("Find apps and files")
+        .placeholder_text("Find apps, files, anything")
         .css_classes(["search"])
         .hexpand(true)
         .build();
@@ -146,9 +176,16 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["results"])
         .build();
+    // The list scrolls when it is taller than the screen allows.
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(MAX_LIST_HEIGHT)
+        .child(&results)
+        .build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&divider());
-    body.append(&results);
+    body.append(&scroller);
 
     // ---- footer -----------------------------------------------------------
     let running = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -186,6 +223,9 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
     overlay.set_measure_overlay(&panel, true);
     window.set_child(Some(&overlay));
 
+    // The worker thread sends file results here; we read them further down.
+    let (file_results_sender, file_results) = async_channel::unbounded::<(u64, Vec<FileHit>)>();
+
     let ui = Rc::new(Ui {
         window: window.clone(),
         backdrop,
@@ -193,9 +233,16 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
         search: search.clone(),
         body,
         results,
+        scroller,
         running,
         footer,
         apps: apps::installed(),
+        actions: catalog::actions(),
+        settings: catalog::settings(),
+        ranker: RefCell::new(Ranker::new()),
+        files: FileSearch::start(file_results_sender),
+        file_hits: RefCell::new(Vec::new()),
+        generation: Cell::new(0),
         pinned: config.dock.pinned.iter().map(|id| id.to_lowercase()).collect(),
         rows: RefCell::new(Vec::new()),
         selected: Cell::new(0),
@@ -208,7 +255,24 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
     // ---- behavior ---------------------------------------------------------
     search.connect_changed({
         let ui = Rc::clone(&ui);
-        move |_| ui.refresh()
+        move |_| ui.query_changed()
+    });
+
+    // Show file results when the worker thread answers.
+    glib::spawn_future_local({
+        let ui = Rc::clone(&ui);
+        async move {
+            while let Ok((generation, hits)) = file_results.recv().await {
+                // Ignore answers to a query that has changed since.
+                if generation == ui.generation.get() {
+                    *ui.file_hits.borrow_mut() = hits;
+                    let selected = ui.selected.get();
+                    ui.refresh();
+                    ui.connect_rows();
+                    ui.select(selected); // keep the highlight where it was
+                }
+            }
+        }
     });
     // Enter opens the highlighted row.
     search.connect_activate({
@@ -240,6 +304,11 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
                 ui.move_selection(-1);
                 glib::Propagation::Stop
             }
+            // Tab completes the field to the highlighted result.
+            gdk::Key::Tab => {
+                ui.complete();
+                glib::Propagation::Stop
+            }
             _ => glib::Propagation::Proceed,
         }
     });
@@ -250,8 +319,16 @@ fn build_ui(app: &gtk::Application) -> gtk::ApplicationWindow {
         let ui = Rc::clone(&ui);
         move |_| {
             ui.search.set_text("");
-            ui.refresh();
+            // Test aid, debug builds only: start with a query from the
+            // environment, since automated tests cannot type into Find.
+            #[cfg(debug_assertions)]
+            if let Ok(query) = std::env::var("MERIDIAN_FIND_TEST_QUERY") {
+                ui.search.set_text(&query);
+            }
+            ui.query_changed();
             ui.search.grab_focus();
+            // The disk may have changed since Find was last open.
+            ui.files.refresh();
         }
     });
 
@@ -297,6 +374,41 @@ impl Ui {
         self.refresh();
     }
 
+    /// The text in the field changed: show what we can at once (apps,
+    /// actions, settings) and ask the worker thread for files.
+    fn query_changed(self: &Rc<Self>) {
+        let generation = self.generation.get() + 1;
+        self.generation.set(generation);
+        self.file_hits.borrow_mut().clear();
+        self.refresh();
+
+        let query = self.search.text().to_string();
+        if query.trim().is_empty() {
+            return;
+        }
+        // Debounce: only search files once typing has paused, and only if
+        // this is still the newest query by then.
+        let ui = Rc::clone(self);
+        glib::timeout_add_local_once(FILE_SEARCH_DELAY, move || {
+            if ui.generation.get() == generation {
+                ui.files.query(generation, &query, MAX_FILES);
+            }
+        });
+    }
+
+    /// Put the highlighted result's name into the search field.
+    fn complete(&self) {
+        let title = self
+            .rows
+            .borrow()
+            .get(self.selected.get())
+            .and_then(|(row, _)| row.widget_name().as_str().strip_prefix("result:").map(String::from));
+        if let Some(title) = title {
+            self.search.set_text(&title);
+            self.search.set_position(-1); // cursor to the end
+        }
+    }
+
     /// Rebuild the result list for the current query.
     fn refresh(&self) {
         let query = self.search.text().to_string();
@@ -305,39 +417,69 @@ impl Ui {
         while let Some(child) = self.results.first_child() {
             self.results.remove(&child);
         }
-        let mut rows = Vec::new();
-
-        // Files: recently used ones whose name matches. Only while searching.
-        if searching {
-            let files = apps::recent_files(&query, MAX_FILES);
-            if !files.is_empty() {
-                self.results.append(&section_label("Files"));
+        let mut rows: Vec<(gtk::Button, Target)> = Vec::new();
+        // Add a group: a heading, then one row per result.
+        let mut group = |heading: &str, items: Vec<(String, String, Target)>| {
+            if items.is_empty() {
+                return;
             }
-            for file in files {
-                let row = result_row(&file.name, &file.folder);
+            self.results.append(&section_label(heading));
+            for (title, kind, target) in items {
+                let row = result_row(&title, &kind);
                 self.results.append(&row);
-                rows.push((row, Target::File(file.uri)));
+                rows.push((row, target));
             }
-        }
-
-        // Apps: matches, or the pinned apps when the field is empty.
-        let apps: Vec<&AppEntry> = if searching {
-            self.apps.iter().filter(|app| app.matches(&query)).take(MAX_APPS).collect()
-        } else {
-            self.pinned
-                .iter()
-                .filter_map(|id| self.apps.iter().find(|app| &app.id == id))
-                .take(MAX_APPS)
-                .collect()
         };
-        if !apps.is_empty() {
-            self.results.append(&section_label(if searching { "Apps" } else { "Pinned" }));
+
+        let mut ranker = self.ranker.borrow_mut();
+        if searching {
+            let apps = ranker.rank(self.apps.iter(), &query, MAX_APPS, |app| (app.name.as_str(), app.keywords()));
+            group(
+                "Apps",
+                apps.into_iter()
+                    .map(|app| (app.name.clone(), "App".into(), Target::App(app.info.clone())))
+                    .collect(),
+            );
+
+            let actions = ranker.rank(self.actions.iter(), &query, MAX_ACTIONS, entry_texts);
+            group(
+                "Actions",
+                actions
+                    .into_iter()
+                    .map(|entry| (entry.title.to_string(), "Action".into(), Target::Run(Rc::clone(&entry.run))))
+                    .collect(),
+            );
+
+            let settings = ranker.rank(self.settings.iter(), &query, MAX_SETTINGS, entry_texts);
+            group(
+                "Settings",
+                settings
+                    .into_iter()
+                    .map(|entry| (entry.title.to_string(), "Setting".into(), Target::Run(Rc::clone(&entry.run))))
+                    .collect(),
+            );
+
+            group(
+                "Files",
+                self.file_hits
+                    .borrow()
+                    .iter()
+                    .map(|hit| (hit.name.clone(), hit.folder.clone(), Target::File(hit.path.clone())))
+                    .collect(),
+            );
+        } else {
+            // Nothing typed yet: the pinned apps.
+            group(
+                "Pinned",
+                self.pinned
+                    .iter()
+                    .filter_map(|id| self.apps.iter().find(|app| &app.id == id))
+                    .take(MAX_APPS)
+                    .map(|app| (app.name.clone(), "App".into(), Target::App(app.info.clone())))
+                    .collect(),
+            );
         }
-        for app in apps {
-            let row = result_row(&app.name, "App");
-            self.results.append(&row);
-            rows.push((row, Target::App(app.info.clone())));
-        }
+        drop(ranker);
 
         if rows.is_empty() {
             self.results.append(
@@ -374,6 +516,16 @@ impl Ui {
         if let Some((row, _)) = rows.get(index) {
             row.add_css_class("selected");
             self.selected.set(index);
+            // Scroll the list so the highlighted row is in view.
+            if let Some(bounds) = row.compute_bounds(&self.results) {
+                let adjustment = self.scroller.vadjustment();
+                let (top, bottom) = (bounds.y() as f64, (bounds.y() + bounds.height()) as f64);
+                if top < adjustment.value() {
+                    adjustment.set_value(top);
+                } else if bottom > adjustment.value() + adjustment.page_size() {
+                    adjustment.set_value(bottom - adjustment.page_size());
+                }
+            }
         }
     }
 
@@ -395,7 +547,13 @@ impl Ui {
         let context = gdk::Display::default().map(|display| display.app_launch_context());
         let result = match &target {
             Target::App(info) => info.launch(&[], context.as_ref()),
-            Target::File(uri) => gio::AppInfo::launch_default_for_uri(uri, context.as_ref()),
+            Target::File(path) => {
+                gio::AppInfo::launch_default_for_uri(&gio::File::for_path(path).uri(), context.as_ref())
+            }
+            Target::Run(run) => {
+                run();
+                Ok(())
+            }
         };
         if let Err(err) = result {
             eprintln!("meridian-launcher: could not open it: {err}");
@@ -499,6 +657,11 @@ fn watch_compositor(app: &gtk::Application, ui: Rc<Ui>) {
     });
 }
 
+/// The name and keywords of an action or setting, for the fuzzy matcher.
+fn entry_texts(entry: &Entry) -> (&str, &str) {
+    (entry.title, entry.keywords)
+}
+
 /// Send one request to the compositor.
 fn send(request: &Request) {
     let sent = Connection::connect().and_then(|mut connection| connection.send(request));
@@ -525,9 +688,9 @@ fn section_label(text: &str) -> gtk::Label {
 }
 
 /// One line in the list: the name on the left, what it is on the right.
-fn result_row(name: &str, kind: &str) -> gtk::Button {
+fn result_row(title: &str, kind: &str) -> gtk::Button {
     let name = gtk::Label::builder()
-        .label(name)
+        .label(title)
         .halign(gtk::Align::Start)
         .hexpand(true)
         .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -537,11 +700,14 @@ fn result_row(name: &str, kind: &str) -> gtk::Button {
     content.append(&name);
     content.append(&kind);
 
-    gtk::Button::builder()
+    let row = gtk::Button::builder()
         .child(&content)
         .css_classes(["result"])
         .focusable(false) // the text field keeps the keyboard
-        .build()
+        .build();
+    // Remembered for Tab completion.
+    row.set_widget_name(&format!("result:{title}"));
+    row
 }
 
 /// Bottom row: running apps and "Power", which swaps in the power actions.

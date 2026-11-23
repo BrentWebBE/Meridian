@@ -8,11 +8,11 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.7.0
+pkgver=0.8.0
 pkgrel=1
 pkgdesc="A Wayland desktop environment written in Rust (early development)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/BrentWebBE/Patina"
+url="https://github.com/BrentWebBE/Meridian"
 license=('MIT')
 depends=('cairo' 'dbus' 'gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
          'libxkbcommon' 'mesa' 'pango' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
