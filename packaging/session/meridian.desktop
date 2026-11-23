@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Meridian
+Comment=Meridian Wayland desktop (early development)
+Exec=meridian-comp
+Type=Application
+DesktopNames=Meridian

@@ -1,0 +1,17 @@
+[package]
+name = "meridian-comp"
+description = "The Meridian Wayland compositor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-common.workspace = true
+smithay.workspace = true
+smithay-drm-extras.workspace = true
+xcursor.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

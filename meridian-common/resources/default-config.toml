@@ -1,0 +1,44 @@
+# Meridian configuration.
+#
+# Copy this file to ~/.config/meridian/config.toml and edit it.
+# Anything you leave out keeps its default. Exception: if you write a
+# [keybindings] section it replaces ALL default keybindings.
+
+# Window layout at startup: "floating" or "tiled".
+layout = "floating"
+
+# Terminal for the "spawn-terminal" action.
+# Empty = the first one installed of: foot, alacritty, kitty, ghostty.
+terminal = ""
+
+[keyboard]
+# XKB names, e.g. layout = "us", "be", "de". Empty = system default.
+layout = ""
+variant = ""
+options = ""          # e.g. "caps:escape"
+repeat-delay = 200    # ms before a held key starts repeating
+repeat-rate = 25      # repeats per second
+
+[output]
+# Scale factor for HiDPI screens: 1, 2, 3. 0 = pick automatically.
+# Fractional scaling is not supported yet.
+scale = 0
+
+[tiled]
+gap = 12              # pixels between tiled windows
+master-ratio = 0.55   # share of the width for the first window
+
+# Keys are written as modifiers and one key joined by "+".
+# Modifiers: Mod, Super, Alt, Ctrl, Shift.
+# "Mod" is Super on a real session and Alt when Meridian runs inside a window.
+# Key names are XKB keysym names (Return, Tab, space, a-z, F1, ...).
+#
+# Actions: "spawn-terminal", "close-window", "quit", "toggle-layout",
+# "focus-next", "focus-previous", or { spawn = "command with args" }.
+[keybindings]
+"Mod+Return" = "spawn-terminal"
+"Mod+Q" = "close-window"
+"Mod+Shift+E" = "quit"
+"Mod+T" = "toggle-layout"
+"Mod+Tab" = "focus-next"
+"Mod+Shift+Tab" = "focus-previous"

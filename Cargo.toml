@@ -1,0 +1,50 @@
+# Meridian workspace. Each desktop component is its own crate (added phase by phase).
+[workspace]
+resolver = "3"
+members = ["meridian-common", "meridian-comp"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/BrentWebBE/Patina"
+
+# Versions are declared once here; member crates say `foo.workspace = true`.
+# Cargo.lock (committed) records the exact resolved versions, like package-lock.json.
+[workspace.dependencies]
+meridian-common = { path = "meridian-common" }
+anyhow = "1.0.100"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.9.8"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+xcursor = "0.3.10"
+
+# Smithay 0.7.0 on crates.io dates from June 2025; niri and cosmic-comp both track
+# git master, so we pin an exact master commit instead.
+[workspace.dependencies.smithay]
+git = "https://github.com/Smithay/smithay.git"
+rev = "a38bb709a0400759b6a4fab6129e0f1dd72808c3"
+default-features = false
+features = [
+    "backend_winit",           # nested: run inside a window
+    "backend_udev",            # real session: find GPUs and monitors
+    "backend_drm",             # ... drive monitors (KMS)
+    "backend_gbm",             # ... allocate GPU buffers
+    "backend_libinput",        # ... keyboards, mice, touchpads
+    "backend_session_libseat", # ... get device access without root
+    "backend_egl",
+    "renderer_gl",
+    "wayland_frontend",
+    "desktop",
+]
+
+# Helper from the Smithay repo that tracks which monitors are plugged in.
+[workspace.dependencies.smithay-drm-extras]
+git = "https://github.com/Smithay/smithay.git"
+rev = "a38bb709a0400759b6a4fab6129e0f1dd72808c3"
+default-features = false
+
+[profile.release]
+lto = "thin"
