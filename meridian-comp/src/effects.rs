@@ -81,6 +81,7 @@ uniform float tint;
 
 uniform vec2 box_size;   // size on screen, in pixels
 uniform float radius;
+uniform float top_radius; // 0.0 below a title bar, which has the rounded corners
 
 ROUNDED_BOX
 
@@ -90,7 +91,8 @@ void main() {
     color = vec4(color.rgb, 1.0);
 #endif
 
-    float distance = rounded_box((v_coords - 0.5) * box_size, box_size / 2.0, radius);
+    vec2 p = (v_coords - 0.5) * box_size;
+    float distance = rounded_box(p, box_size / 2.0, p.y < 0.0 ? top_radius : radius);
     // One pixel of smooth transition avoids jagged corners.
     float inside = 1.0 - smoothstep(-0.5, 0.5, distance);
     gl_FragColor = color * alpha * inside;
@@ -196,6 +198,7 @@ impl Effects {
                 &[
                     UniformName::new("box_size", UniformType::_2f),
                     UniformName::new("radius", UniformType::_1f),
+                    UniformName::new("top_radius", UniformType::_1f),
                 ],
             )
             .context("could not compile the rounded-corner shader")?;
@@ -391,6 +394,7 @@ impl Effects {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // each one is a distinct aspect of how to draw
     /// Draw `texture` at `location` with rounded corners.
     /// `size` scales it (thumbnails); `None` draws it at its natural size.
     pub fn rounded(
@@ -399,6 +403,8 @@ impl Effects {
         location: Point<f64, Physical>,
         size: Option<Size<i32, Logical>>,
         radius: f32,
+        // False for windows with a title bar above them.
+        round_top: bool,
         output_scale: f64,
         fresh_id: bool,
     ) -> RoundedTextureElement {
@@ -425,6 +431,7 @@ impl Effects {
             uniforms: vec![
                 Uniform::new("box_size", (box_size.w as f32, box_size.h as f32)),
                 Uniform::new("radius", radius * output_scale as f32),
+                Uniform::new("top_radius", if round_top { radius * output_scale as f32 } else { 0.0 }),
             ],
             inner,
         }

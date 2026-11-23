@@ -25,6 +25,7 @@ use smithay::{
 };
 
 use crate::{
+    decorations,
     effects::{self, Effects, RoundedTextureElement, Shadow},
     layout::Rect,
     overview::OverviewScene,
@@ -70,6 +71,7 @@ render_elements! {
     pub OutputElement<=GlesRenderer>;
     // Client surfaces drawn as they are: bar, dock, popups, cursor surfaces.
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    // Images painted on the CPU: the cursor and title bars.
     CursorImage=MemoryRenderBufferRenderElement<GlesRenderer>,
     // Windows, drawn through the rounded-corner shader (effects.rs).
     Rounded=RoundedTextureElement,
@@ -235,21 +237,33 @@ fn window_elements(
         );
     }
 
+    // Our title bar, if this window lets us draw one.
+    let decorated = decorations::is_decorated(window);
+    let frame = decorations::frame_rect(window, rect);
+    if decorated
+        && let Some(titlebar) =
+            decorations::titlebar_element(renderer, window, frame.loc, frame.size.w, focused, effects.theme(), scale)
+    {
+        elements.push(OutputElement::CursorImage(titlebar));
+    }
+
     let body = effects::with_window_texture(renderer, window, scale, |texture| {
         effects.rounded(
             texture,
             rect.loc.to_f64().to_physical(scale),
             None,
             effects::RADIUS,
+            !decorated,
             scale,
             false,
         )
     });
     if let Some(body) = body {
         elements.push(OutputElement::Rounded(body));
+        // Shadow and outline surround the whole frame, title bar included.
         elements.extend(
             effects
-                .window_backdrop(window, rect, focused)
+                .window_backdrop(window, frame, focused)
                 .into_iter()
                 .map(OutputElement::Shader),
         );
@@ -280,6 +294,7 @@ fn overview_elements(
                 rect.loc.to_f64().to_physical(scale),
                 Some(rect.size),
                 radius,
+                true,
                 scale,
                 true,
             )

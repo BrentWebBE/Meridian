@@ -43,7 +43,7 @@ use smithay::{
         selection::data_device::DataDeviceState,
         shell::{
             wlr_layer::{Layer, WlrLayerShellState},
-            xdg::XdgShellState,
+            xdg::{XdgShellState, decoration::XdgDecorationState},
         },
         shm::ShmState,
         socket::ListeningSocketSource,
@@ -52,6 +52,7 @@ use smithay::{
 
 use crate::{
     backend::{Backend, Scene},
+    decorations::{self, TITLE_HEIGHT},
     effects::Effects,
     grabs::ResizeState,
     ipc::IpcServer,
@@ -126,6 +127,7 @@ pub struct Meridian {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub layer_shell_state: WlrLayerShellState,
+    pub _xdg_decoration_state: XdgDecorationState,
     pub shm_state: ShmState,
     pub dmabuf_state: DmabufState,
     pub _dmabuf_global: DmabufGlobal,
@@ -152,6 +154,8 @@ impl Meridian {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         // wlr-layer-shell: bar, dock and other desktop surfaces (handlers/layer_shell.rs).
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        // xdg-decoration: lets clients hand the title bar over to us (decorations.rs).
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         // wl_shm: clients share pixel buffers through shared memory (CPU rendering).
         let shm_state = ShmState::new::<Self>(&dh, backend.renderer().shm_formats());
         // linux-dmabuf: clients share GPU buffers. Anything using OpenGL/Vulkan
@@ -215,6 +219,7 @@ impl Meridian {
             compositor_state,
             xdg_shell_state,
             layer_shell_state,
+            _xdg_decoration_state: xdg_decoration_state,
             shm_state,
             dmabuf_state,
             _dmabuf_global: dmabuf_global,
@@ -278,7 +283,8 @@ impl Meridian {
         }
 
         // In the overview windows are thumbnails; clients get no pointer input.
-        if self.overview {
+        // Title bars and borders are ours as well.
+        if self.overview || self.frame_hit(pos).is_some() {
             return None;
         }
 
@@ -381,10 +387,28 @@ impl Meridian {
         // Each space is arranged on its own; parked spaces are left alone.
         let windows = self.space_windows(self.active_space);
         let Some(rects) = self.layout.arrange(area, windows.len()) else {
-            return; // floating: nothing to do
+            // Floating: windows stay where they are, except that a title
+            // bar must never end up underneath the top bar (this happens
+            // when a window opens before the bar has reserved its space).
+            for window in &windows {
+                let Some(location) = self.space.element_location(window) else { continue };
+                let bar = if decorations::is_decorated(window) { TITLE_HEIGHT } else { 0 };
+                let highest = area.loc.y + bar;
+                if location.y < highest {
+                    self.space.map_element(window.clone(), (location.x, highest + 8), false);
+                }
+            }
+            return;
         };
 
         for (window, rect) in windows.iter().zip(rects) {
+            // The tile is for the whole frame; the content gets what is
+            // left under our title bar.
+            let bar = if decorations::is_decorated(window) { TITLE_HEIGHT } else { 0 };
+            let rect = Rect::new(
+                (rect.loc.x, rect.loc.y + bar).into(),
+                (rect.size.w, (rect.size.h - bar).max(1)).into(),
+            );
             if let Some(toplevel) = window.toplevel() {
                 // We cannot resize a client's window ourselves. We send the
                 // size we want in a configure event and the client redraws.

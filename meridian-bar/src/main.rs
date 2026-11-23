@@ -5,6 +5,8 @@
 //! protocol: instead of a normal window, the compositor gives us a strip
 //! anchored to the top edge and keeps other windows out of it.
 
+mod tray;
+
 use std::{cell::RefCell, rc::Rc};
 
 use gtk::{gio, glib, prelude::*};
@@ -55,18 +57,41 @@ fn build_ui(app: &gtk::Application) {
     menu_button.connect_clicked(|_| open_launcher());
     let app_name = gtk::Label::builder().label("Desktop").css_classes(["app-name"]).build();
 
-    let left = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    // The focused app's menus would go here. Showing another program's menus
+    // needs a protocol we do not speak yet, so this is a visual stub only.
+    let app_menu = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(14)
+        .css_classes(["app-menu"])
+        .tooltip_text("App menus are not available yet")
+        .visible(false)
+        .build();
+    for title in ["File", "Edit", "View", "Window"] {
+        app_menu.append(&gtk::Label::new(Some(title)));
+    }
+
+    let left = gtk::Box::new(gtk::Orientation::Horizontal, 14);
     left.append(&menu_button);
     left.append(&app_name);
+    left.append(&app_menu);
 
-    // ---- right: status and clock ------------------------------------------
+    // ---- right: tray and clock --------------------------------------------
+    let network = gtk::Image::new();
+    let volume = gtk::Image::new();
     let battery = gtk::Image::new();
+    let bell = tray::bell();
     let clock = gtk::Label::builder().css_classes(["clock"]).build();
 
     let right = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     right.add_css_class("status");
+    right.append(&network);
+    right.append(&volume);
     right.append(&battery);
+    right.append(&bell);
     right.append(&clock);
+
+    tray::watch_network(&network);
+    tray::watch_volume(&volume);
 
     let content = gtk::CenterBox::builder().css_classes(["bar-content"]).build();
     // ---- center: one pill per space (virtual desktop) -------------------
@@ -115,7 +140,7 @@ fn build_ui(app: &gtk::Application) {
         ),
     );
 
-    watch_compositor(app_name, spaces);
+    watch_compositor(app_name, app_menu, spaces);
 
     window.present();
 }
@@ -191,6 +216,7 @@ fn show_spaces(spaces: &gtk::Box, state: &State) {
         let pill = gtk::Button::builder()
             .label(number.to_string())
             .css_classes(["space"])
+            .valign(gtk::Align::Center)
             .tooltip_text(format!("Space {number}"))
             .build();
         if index == state.active_space {
@@ -206,7 +232,7 @@ fn show_spaces(spaces: &gtk::Box, state: &State) {
 }
 
 /// Show the focused application's name and the spaces, as reported by the compositor.
-fn watch_compositor(app_name: gtk::Label, spaces: gtk::Box) {
+fn watch_compositor(app_name: gtk::Label, app_menu: gtk::Box, spaces: gtk::Box) {
     let connection = match Connection::connect() {
         Ok(connection) => connection,
         Err(err) => {
@@ -227,6 +253,8 @@ fn watch_compositor(app_name: gtk::Label, spaces: gtk::Box) {
                 if let Some(state) = states.last() {
                     shell::apply_mood(&state.theme);
                     app_name.set_label(&focused_app_name(state));
+                    // Menus only make sense when an app is focused.
+                    app_menu.set_visible(state.windows.iter().any(|window| window.focused));
                     show_spaces(&spaces, state);
                 }
                 glib::ControlFlow::Continue

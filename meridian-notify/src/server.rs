@@ -29,6 +29,8 @@ pub struct Notification {
 pub enum Event {
     Show(Notification),
     Close(u32),
+    /// The bar's bell was clicked: nothing is unread any more.
+    MarkRead,
 }
 
 /// Why a notification went away; the numbers are fixed by the specification.
@@ -104,9 +106,36 @@ impl Server {
     }
 }
 
+/// Our own small interface next to the standard one. The bar uses it to
+/// show a dot on its bell while there are unseen notifications.
+pub const STATUS_PATH: &str = "/org/meridian/Notifications";
+pub const STATUS_INTERFACE: &str = "org.meridian.Notifications";
+
+struct Status {
+    events: async_channel::Sender<Event>,
+}
+
+#[zbus::interface(name = "org.meridian.Notifications")]
+impl Status {
+    fn mark_read(&self) {
+        let _ = self.events.send_blocking(Event::MarkRead);
+    }
+}
+
+/// Tell listeners (the bar) how many notifications went unseen.
+pub async fn emit_unread(connection: Connection, unread: u32) {
+    let result = connection
+        .emit_signal(None::<&str>, STATUS_PATH, STATUS_INTERFACE, "UnreadChanged", &(unread,))
+        .await;
+    if let Err(err) = result {
+        eprintln!("meridian-notify: could not send UnreadChanged: {err}");
+    }
+}
+
 /// Connect to the session bus and claim the notifications name.
 /// Fails if another notification daemon already owns it.
 pub fn start(events: async_channel::Sender<Event>) -> zbus::Result<Connection> {
+    let status = Status { events: events.clone() };
     let server = Server {
         next_id: AtomicU32::new(1),
         events,
@@ -118,6 +147,7 @@ pub fn start(events: async_channel::Sender<Event>) -> zbus::Result<Connection> {
         zbus::connection::Builder::session()
             .name(BUS_NAME)
             .serve_at(OBJECT_PATH, server)
+            .serve_at(STATUS_PATH, status)
             .build(),
     )
 }
