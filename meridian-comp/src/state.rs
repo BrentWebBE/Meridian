@@ -353,7 +353,7 @@ impl Meridian {
             return;
         }
         let serial = SERIAL_COUNTER.next_serial();
-        let keyboard = self.seat.get_keyboard().expect("seat has a keyboard");
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
 
         match window {
             Some(window) => {

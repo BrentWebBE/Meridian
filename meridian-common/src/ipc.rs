@@ -54,6 +54,8 @@ pub struct State {
     /// Goes up every time the compositor re-reads the config file, so
     /// shell programs know to re-read it too.
     pub config_generation: u32,
+    /// True while the session is locked.
+    pub locked: bool,
     /// True when the compositor runs as a window inside another desktop:
     /// a development aid, not a full session.
     pub nested: bool,

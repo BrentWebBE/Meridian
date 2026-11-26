@@ -363,6 +363,51 @@ session yet.
 - **XWayland scale:** only checked at scale 1 nested. HiDPI is unverified.
 - **Everything as real session units:** verify with `terra-doctor`.
 
+## Step 4: crash resilience
+
+Status: done for what can be exercised nested; all checks below were run.
+
+### What changed
+
+- **No `unwrap` or `expect` left in the compositor's non-test code**
+  (10 before, 0 after; counted with `grep` over `meridian-comp/src`). Missing
+  seat devices return early, poisoned locks fall back to a default, and a
+  client without our per-client data gets a shared spare instead of a panic.
+  Indexing was reviewed: the three remaining `[...]` sites index fixed-size
+  arrays or values bounded on the line above.
+- **Panic hook:** a panic writes
+  `~/.local/state/meridian/panic-<unix time>.log` with the message, location
+  and a backtrace, and the same text goes to the session log.
+- **IPC state has `locked`**, so tests and tools can see the lock state.
+- **`scripts/abuse-test.sh`:** starts a nested compositor and mistreats it.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Deliberate panic (debug build, `MERIDIAN_TEST_PANIC=1`) | PASS: `panic-*.log` written with message, `main.rs:148` and backtrace; exit status 101 |
+| 30 clients sending 4 kB of random bytes on the Wayland socket | PASS: compositor alive |
+| Random bytes, invalid JSON, an unknown action and a 2 MB line on the IPC socket | PASS: compositor alive, a normal client is still answered |
+| 5 windows whose client is killed with SIGKILL | PASS |
+| Bar, dock, desktop icons and Find killed with SIGKILL (as plain children) | PASS: compositor and the open app survive each |
+| Dock, desktop icons and Find as transient systemd units with the shipped settings, killed with SIGKILL | PASS: each `active` again within 3.5 s, `NRestarts=1` (the bar was checked in step 1) |
+| Lock program killed while locked | PASS: `locked` stays true immediately after, the program is restarted, still locked |
+| Focus request over IPC while locked | PASS: no window gets focus |
+| Crash reports after the whole abuse run | PASS: none written |
+
+`scripts/abuse-test.sh` exits 0 with 14 PASS lines.
+
+### Not done or not verified
+
+- **Panics inside Smithay or drivers** cannot be audited from here; the hook
+  will at least record them.
+- **The notification daemon as a unit** was not restart-tested: in the host
+  session another daemon owns the bus name, so ours exits at once.
+- **Malformed but well-typed protocol use** (for example absurd sizes or
+  thousands of surfaces) is not covered by the random-bytes test. That
+  belongs with the client-server tests in step 7.
+- **Restart in a real session** with the installed units: see step 1.
+
 ## Still broken (running list)
 
 Ranked by expected user impact; re-ranked as measurements come in.
@@ -372,6 +417,6 @@ Ranked by expected user impact; re-ranked as measurements come in.
 2. No screenshot or screencast portal (step 3).
 3. Occasional 18 to 23 ms frames when windows open (step 2).
 4. Lock screen unlock path never tested with a real password.
-5. Ten `expect`/`unwrap` sites in the compositor and no panic hook (step 4).
-6. Popups do not close on an outside click; several protocols missing (0.7).
-7. Tray menus, notification action clicks and the polkit agent are untested.
+5. Popups do not close on an outside click; several protocols missing (0.7).
+6. Tray menus, notification action clicks and the polkit agent are untested.
+7. No idle handling, sleep inhibitors or lock-before-suspend yet (step 5).

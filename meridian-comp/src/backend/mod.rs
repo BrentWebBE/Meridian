@@ -122,7 +122,7 @@ pub fn output_elements(renderer: &mut GlesRenderer, output: &Output, scene: &Sce
                     states
                         .data_map
                         .get::<CursorImageSurfaceData>()
-                        .map(|data| data.lock().unwrap().hotspot)
+                        .and_then(|data| data.lock().ok().map(|data| data.hotspot))
                         .unwrap_or_default()
                 });
                 let location: Point<i32, Physical> = (position - hotspot.to_f64()).to_physical(scale).to_i32_round();

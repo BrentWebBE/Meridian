@@ -96,6 +96,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     init_logging();
+    install_panic_hook();
 
     // A broken config must not lock you out of your session: report and continue.
     let config = Config::load().unwrap_or_else(|err| {
@@ -136,6 +137,20 @@ fn main() -> anyhow::Result<()> {
     state.init_wallpaper();
     state.watch_config_files();
 
+    // Test aid, debug builds only: panic on purpose shortly after startup,
+    // to check that the crash report is written.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("MERIDIAN_TEST_PANIC").is_some() {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let _ = event_loop
+            .handle()
+            .insert_source(Timer::from_duration(std::time::Duration::from_secs(2)), |_, _, _| {
+                panic!("MERIDIAN_TEST_PANIC is set: this panic is deliberate");
+                #[allow(unreachable_code)]
+                TimeoutAction::Drop
+            });
+    }
+
     if nested {
         // Say it loudly: this is a development aid, not the desktop.
         tracing::warn!(
@@ -170,6 +185,43 @@ fn main() -> anyhow::Result<()> {
         .context("event loop failed")?;
 
     Ok(())
+}
+
+/// Where crash reports go: `~/.local/state/meridian`.
+fn state_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state")))?;
+    Some(base.join("meridian"))
+}
+
+/// If the compositor ever panics (a bug: it should not), write what
+/// happened and where to a file before the process dies, so there is
+/// something to send with a bug report. The session script's log gets the
+/// same text through stderr.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // `force_capture` records the call stack even without RUST_BACKTRACE.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let report = format!(
+            "meridian-comp {} panicked\n{info}\n\nbacktrace:\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION")
+        );
+        if let Some(dir) = state_dir()
+            && std::fs::create_dir_all(&dir).is_ok()
+        {
+            let seconds = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs());
+            let path = dir.join(format!("panic-{seconds}.log"));
+            if std::fs::write(&path, &report).is_ok() {
+                eprintln!("meridian-comp: crash report written to {}", path.display());
+            }
+        }
+        default_hook(info);
+    }));
 }
 
 /// Log to stderr. Set `RUST_LOG=debug` (or `RUST_LOG=smithay=trace`) for more.
