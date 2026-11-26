@@ -40,7 +40,11 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState},
         output::OutputManagerState,
-        selection::data_device::DataDeviceState,
+        selection::{
+            data_device::DataDeviceState, ext_data_control::DataControlState as ExtDataControlState,
+            primary_selection::PrimarySelectionState, wlr_data_control::DataControlState as WlrDataControlState,
+        },
+        viewporter::ViewporterState,
         session_lock::SessionLockManagerState,
         shell::{
             wlr_layer::{Layer, WlrLayerShellState},
@@ -144,6 +148,10 @@ pub struct Meridian {
     pub _output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Meridian>,
     pub data_device_state: DataDeviceState,
+    pub primary_selection_state: PrimarySelectionState,
+    pub wlr_data_control_state: WlrDataControlState,
+    pub ext_data_control_state: ExtDataControlState,
+    pub _viewporter_state: ViewporterState,
 
     /// A seat is one set of input devices (keyboard + pointer) and its focus.
     pub seat: Seat<Self>,
@@ -179,6 +187,18 @@ impl Meridian {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         // wl_data_device: clipboard and drag-and-drop.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        // Primary selection: the "select to copy, middle-click to paste" clipboard.
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        // data-control (both the older wlr and the newer ext version): lets a
+        // clipboard manager read and re-offer selections, so that copied
+        // text survives the app it was copied from.
+        let wlr_data_control_state =
+            WlrDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_client| true);
+        let ext_data_control_state =
+            ExtDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_client| true);
+        // viewporter: clients crop and scale their buffers. Required by
+        // xwayland-satellite and used by video players.
+        let viewporter_state = ViewporterState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
@@ -243,6 +263,10 @@ impl Meridian {
             _output_manager_state: output_manager_state,
             seat_state,
             data_device_state,
+            primary_selection_state,
+            wlr_data_control_state,
+            ext_data_control_state,
+            _viewporter_state: viewporter_state,
             seat,
         })
     }
@@ -729,12 +753,13 @@ impl Meridian {
     /// Start a program as a client of this compositor.
     pub fn spawn(&self, program: &str, args: &[String]) {
         let mut command = Command::new(resolve_program(program));
-        command
-            .args(args)
-            .env("WAYLAND_DISPLAY", &self.socket_name)
-            // We have no X server yet; without this, X11-capable apps would
-            // open on the host desktop instead.
-            .env_remove("DISPLAY");
+        command.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
+        // Nested, DISPLAY belongs to the host desktop: X11-capable apps
+        // would open there instead of in our window. In a real session it
+        // is ours (set by the session script for xwayland-satellite).
+        if matches!(self.backend, Backend::Winit(_)) {
+            command.env_remove("DISPLAY");
+        }
         if let Some(socket) = &self.ipc_socket {
             command.env(meridian_common::ipc::SOCKET_ENV, socket);
         }
@@ -787,8 +812,11 @@ impl Meridian {
         if let Some(socket) = &self.ipc_socket {
             variables.push(format!("{}={}", meridian_common::ipc::SOCKET_ENV, socket.display()));
         }
-        if let Ok(platform) = std::env::var("QT_QPA_PLATFORM") {
-            variables.push(format!("QT_QPA_PLATFORM={platform}"));
+        // Set by the session script when XWayland is available.
+        for name in ["QT_QPA_PLATFORM", "DISPLAY"] {
+            if let Ok(value) = std::env::var(name) {
+                variables.push(format!("{name}={value}"));
+            }
         }
 
         std::thread::spawn(move || {

@@ -1,0 +1,12 @@
+[Unit]
+Description=Terra polkit authentication agent
+Documentation=https://github.com/BrentWebBE/Meridian
+PartOf=graphical-session.target
+After=graphical-session.target
+# Skipped, not failed, when the program is not installed.
+ConditionPathExists=/usr/bin/meridian-polkit-agent
+
+[Service]
+ExecStart=/usr/bin/meridian-polkit-agent
+Restart=on-failure
+RestartSec=1

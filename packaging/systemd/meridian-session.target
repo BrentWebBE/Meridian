@@ -12,3 +12,8 @@ After=graphical-session-pre.target
 # others or the compositor down, and systemd starts it again.
 Wants=meridian-bar.service meridian-dock.service meridian-desktop.service
 Wants=meridian-notify.service meridian-launcher.service
+# Helpers from other packages; each unit is skipped if its program is missing.
+Wants=meridian-clipboard.service meridian-polkit-agent.service meridian-xwayland.service
+# Sound. These are normally socket-activated anyway; asking for them here
+# makes sure they belong to the session.
+Wants=pipewire.socket pipewire-pulse.socket wireplumber.service

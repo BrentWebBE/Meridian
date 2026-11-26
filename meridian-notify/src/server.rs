@@ -22,6 +22,19 @@ pub struct Notification {
     pub body: String,
     /// Milliseconds; 0 = never expire, -1 = let the daemon decide.
     pub expire_timeout: i32,
+    /// Buttons the application offers: (key, label). The key "default" is
+    /// not a button; it is what clicking the notification itself means.
+    pub actions: Vec<(String, String)>,
+    pub urgency: Urgency,
+}
+
+/// How important the application says a notification is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Urgency {
+    Low,
+    Normal,
+    /// Stays until dismissed, whatever timeout was asked for.
+    Critical,
 }
 
 /// What the D-Bus thread tells the GTK thread.
@@ -51,9 +64,10 @@ struct Server {
 // method with its name in CamelCase (`notify` is called as `Notify`).
 #[zbus::interface(name = "org.freedesktop.Notifications")]
 impl Server {
-    /// Which optional features we support. "body" = we show body text.
+    /// Which optional features we support: body text, action buttons,
+    /// and icons given as a name or file.
     fn get_capabilities(&self) -> Vec<&'static str> {
-        vec!["body"]
+        vec!["body", "actions", "icon-static"]
     }
 
     #[allow(clippy::too_many_arguments)] // the argument list is fixed by the specification
@@ -64,7 +78,7 @@ impl Server {
         app_icon: String,
         summary: String,
         body: String,
-        _actions: Vec<String>,
+        actions: Vec<String>,
         hints: HashMap<String, OwnedVariant>,
         expire_timeout: i32,
     ) -> u32 {
@@ -83,9 +97,18 @@ impl Server {
             .map(|path| path.trim_start_matches("file://").to_string());
         let icon = if app_icon.is_empty() { hint_icon.unwrap_or_default() } else { app_icon };
 
+        // The "urgency" hint is a byte: 0 low, 1 normal, 2 critical.
+        let urgency = match hints.get("urgency").and_then(|value| value.downcast_ref::<u8>().ok()) {
+            Some(0) => Urgency::Low,
+            Some(2) => Urgency::Critical,
+            _ => Urgency::Normal,
+        };
+
         let notification = Notification {
             id,
             app_name,
+            actions: pair_actions(&actions),
+            urgency,
             icon,
             summary,
             body: strip_markup(&body),
@@ -168,6 +191,24 @@ pub async fn emit_closed(connection: Connection, id: u32, reason: CloseReason) {
     }
 }
 
+/// Tell the application that the user chose one of its actions.
+pub async fn emit_action(connection: Connection, id: u32, key: String) {
+    let result = connection
+        .emit_signal(None::<&str>, OBJECT_PATH, BUS_NAME, "ActionInvoked", &(id, key))
+        .await;
+    if let Err(err) = result {
+        eprintln!("meridian-notify: could not send ActionInvoked: {err}");
+    }
+}
+
+/// Actions arrive as a flat list: key, label, key, label, ...
+/// A trailing key without a label is ignored.
+fn pair_actions(flat: &[String]) -> Vec<(String, String)> {
+    flat.chunks_exact(2)
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect()
+}
+
 /// Bodies may contain simple markup such as `<b>`. We show plain text, so
 /// drop the tags and decode the few entities the specification allows.
 fn strip_markup(body: &str) -> String {
@@ -190,7 +231,20 @@ fn strip_markup(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_markup;
+    use super::{pair_actions, strip_markup};
+
+    #[test]
+    fn actions_are_paired() {
+        let flat: Vec<String> = ["default", "Open", "reply", "Reply", "dangling"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            pair_actions(&flat),
+            vec![("default".to_string(), "Open".to_string()), ("reply".to_string(), "Reply".to_string())]
+        );
+        assert!(pair_actions(&[]).is_empty());
+    }
 
     #[test]
     fn markup_is_removed() {

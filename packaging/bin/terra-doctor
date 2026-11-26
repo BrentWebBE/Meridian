@@ -66,7 +66,9 @@ if installed xdg-desktop-portal-gtk; then pass "xdg-desktop-portal-gtk (file cho
 else fail "xdg-desktop-portal-gtk is not installed" "sudo pacman -S xdg-desktop-portal-gtk"; fi
 if [ -f /usr/share/xdg-desktop-portal/meridian-portals.conf ] || [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/meridian-portals.conf" ]; then
     pass "a portals.conf for Meridian exists"
-else fail "no meridian-portals.conf: no portal backend is selected in a Terra session" "not shipped yet (see STABILIZATION.md, step 3)"; fi
+else fail "no meridian-portals.conf: no portal backend is selected in a Terra session" "reinstall the meridian-git package"; fi
+fail "no screenshot or screencast portal: apps cannot capture the screen (the Print key still works)" \
+    "no backend for this compositor exists yet (see STABILIZATION.md, step 3)"
 if [ -n "$(bus_owner org.freedesktop.portal.Desktop)" ]; then pass "xdg-desktop-portal is on the bus"
 else fail "xdg-desktop-portal is not running" "systemctl --user start xdg-desktop-portal.service"; fi
 
@@ -78,7 +80,7 @@ done
 
 section "Authentication and secrets"
 if pgrep -f 'polkit.*agent|polkit-gnome|lxqt-policykit|mate-polkit|hyprpolkitagent' >/dev/null; then pass "a polkit authentication agent is running"
-else fail "no polkit authentication agent: pkexec and admin prompts cannot ask for a password" "not started by the session yet (see STABILIZATION.md, step 3)"; fi
+else fail "no polkit authentication agent: pkexec and admin prompts cannot ask for a password" "sudo pacman -S polkit-gnome, then log in again (meridian-polkit-agent.service starts it)"; fi
 if [ -n "$(bus_owner org.freedesktop.secrets)" ]; then pass "a keyring owns org.freedesktop.secrets"
 else fail "no keyring on the bus: apps cannot store passwords" "sudo pacman -S gnome-keyring, then log in again"; fi
 if [ -f /etc/pam.d/meridian-lock ]; then pass "lock screen PAM rules are installed"
@@ -86,13 +88,13 @@ else fail "/etc/pam.d/meridian-lock is missing: the lock screen refuses to lock"
 
 section "Tray and clipboard"
 if [ -n "$(bus_owner org.kde.StatusNotifierWatcher)" ]; then pass "a tray watcher owns org.kde.StatusNotifierWatcher"
-else fail "no tray: apps with tray icons have nowhere to show them" "not implemented yet (see STABILIZATION.md, step 3)"; fi
-if pgrep -x 'wl-clip-persist|cliphist|clipman|wl-paste' >/dev/null; then pass "a clipboard manager is running"
-else fail "no clipboard manager: copied text is lost when the source app closes" "not possible yet, the compositor lacks the data-control protocol (step 3)"; fi
+else fail "no tray: apps with tray icons have nowhere to show them" "the bar provides it: systemctl --user restart meridian-bar.service"; fi
+if pgrep -x 'wl-clip-persist|cliphist|clipman' >/dev/null; then pass "a clipboard manager is running"
+else fail "no clipboard manager: copied text is lost when the source app closes" "sudo pacman -S wl-clip-persist; systemctl --user start meridian-clipboard.service"; fi
 
 section "X11 apps"
 if pgrep -x 'xwayland-satelli|Xwayland' >/dev/null && [ -n "${DISPLAY:-}" ]; then pass "XWayland is running (DISPLAY=$DISPLAY)"
-else fail "no XWayland: X11-only apps do not start" "not wired up yet (see STABILIZATION.md, step 3)"; fi
+else fail "no XWayland: X11-only apps do not start" "sudo pacman -S xwayland-satellite, then log in again (meridian-xwayland.service starts it)"; fi
 
 section "Qt"
 for package in qt5-wayland qt6-wayland; do

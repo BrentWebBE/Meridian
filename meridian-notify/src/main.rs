@@ -28,7 +28,7 @@ use meridian_common::{
     shell,
 };
 
-use crate::server::{CloseReason, Event, Notification};
+use crate::server::{CloseReason, Event, Notification, Urgency};
 
 /// How long a popup stays when the application does not say.
 const DEFAULT_TIMEOUT_MS: u32 = 5000;
@@ -116,7 +116,7 @@ struct Popups {
 }
 
 struct Card {
-    widget: gtk::Button,
+    widget: gtk::Box,
     /// The pending auto-close timer, if the notification expires.
     timer: Option<glib::SourceId>,
 }
@@ -180,22 +180,61 @@ impl Popups {
         content.append(&icon);
         content.append(&text);
 
-        let widget = gtk::Button::builder()
-            .child(&content)
+        // The card: content on top, action buttons (if any) below.
+        let widget = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
             .css_classes(["card"])
             .width_request(CARD_WIDTH)
             .build();
-        // Clicking a popup dismisses it. A weak reference avoids a cycle
-        // (the card would keep `Popups` alive and the other way around).
+        if notification.urgency == Urgency::Critical {
+            widget.add_css_class("critical");
+        }
+        widget.append(&content);
+
+        // One button per action. "default" is not a button: it is what a
+        // click on the card itself means.
+        let has_default = notification.actions.iter().any(|(key, _)| key == "default");
+        let buttons = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .css_classes(["actions"])
+            .build();
+        for (key, label) in notification.actions.iter().filter(|(key, _)| key != "default") {
+            let button = gtk::Button::builder().label(label).css_classes(["action"]).build();
+            // A weak reference avoids a cycle (the card would keep
+            // `Popups` alive and the other way around).
+            let popups = Rc::downgrade(self);
+            let key = key.clone();
+            button.connect_clicked(move |_| {
+                if let Some(popups) = popups.upgrade() {
+                    popups.invoke(id, &key);
+                }
+            });
+            buttons.append(&button);
+        }
+        if buttons.first_child().is_some() {
+            widget.append(&buttons);
+        }
+
+        // A click on the card: run the default action if there is one,
+        // and dismiss the popup either way.
+        let click = gtk::GestureClick::new();
         let popups = Rc::downgrade(self);
-        widget.connect_clicked(move |_| {
+        click.connect_released(move |_, _, _, _| {
             if let Some(popups) = popups.upgrade() {
-                popups.close(id, CloseReason::Dismissed);
+                if has_default {
+                    popups.invoke(id, "default");
+                } else {
+                    popups.close(id, CloseReason::Dismissed);
+                }
             }
         });
+        content.add_controller(click);
 
         // A timeout of 0 means "stay until dismissed"; negative means "you decide".
+        // Critical ones stay regardless.
         let timeout_ms = match notification.expire_timeout {
+            _ if notification.urgency == Urgency::Critical => None,
             0 => None,
             ms if ms < 0 => Some(DEFAULT_TIMEOUT_MS),
             ms => Some(ms as u32),
@@ -226,6 +265,14 @@ impl Popups {
         }
 
         self.window.present();
+    }
+
+    /// The user chose an action: tell the application, then close the popup.
+    fn invoke(&self, id: u32, key: &str) {
+        if self.cards.borrow().contains_key(&id) {
+            glib::spawn_future_local(server::emit_action(self.connection.clone(), id, key.to_string()));
+            self.close(id, CloseReason::Dismissed);
+        }
     }
 
     fn set_unread(&self, unread: u32) {
