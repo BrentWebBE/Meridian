@@ -22,6 +22,7 @@ use smithay::{
         selection::{
             SelectionHandler,
             data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus},
+            primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus},
         },
     },
 };
@@ -49,7 +50,8 @@ impl SeatHandler for Meridian {
         // Only the focused client may read the clipboard.
         let dh = &self.display_handle;
         let client = focused.and_then(|surface| dh.get_client(surface.id()).ok());
-        set_data_device_focus(dh, seat, client);
+        set_data_device_focus(dh, seat, client.clone());
+        set_primary_focus(dh, seat, client);
 
         // Note: the keyboard is locked during this call. Do not call
         // `seat.get_keyboard()` methods from here.
@@ -71,6 +73,26 @@ impl SelectionHandler for Meridian {
 impl DataDeviceHandler for Meridian {
     fn data_device_state(&mut self) -> &mut DataDeviceState {
         &mut self.data_device_state
+    }
+}
+
+impl PrimarySelectionHandler for Meridian {
+    fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
+        &mut self.primary_selection_state
+    }
+}
+
+// Clipboard managers. The two versions of the protocol have traits of the
+// same name, hence the paths.
+impl smithay::wayland::selection::wlr_data_control::DataControlHandler for Meridian {
+    fn data_control_state(&mut self) -> &mut smithay::wayland::selection::wlr_data_control::DataControlState {
+        &mut self.wlr_data_control_state
+    }
+}
+
+impl smithay::wayland::selection::ext_data_control::DataControlHandler for Meridian {
+    fn data_control_state(&mut self) -> &mut smithay::wayland::selection::ext_data_control::DataControlState {
+        &mut self.ext_data_control_state
     }
 }
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Terra XWayland (X11 apps, through xwayland-satellite)
+Documentation=https://github.com/BrentWebBE/Meridian
+PartOf=graphical-session.target
+After=graphical-session.target
+# Skipped, not failed, when the program is not installed.
+ConditionPathExists=/usr/bin/xwayland-satellite
+
+[Service]
+ExecStart=/usr/bin/xwayland-satellite ${DISPLAY}
+Restart=on-failure
+RestartSec=1

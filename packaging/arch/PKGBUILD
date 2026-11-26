@@ -15,11 +15,17 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/BrentWebBE/Meridian"
 license=('MIT')
 depends=('cairo' 'dbus' 'gcc-libs' 'glibc' 'glib2' 'gtk4' 'gtk4-layer-shell' 'libdrm' 'libglvnd' 'libinput'
-         'libxkbcommon' 'mesa' 'pam' 'pango' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
+         'libxkbcommon' 'mesa' 'pam' 'pango' 'wl-clip-persist' 'xdg-desktop-portal'
+         'xdg-desktop-portal-gtk' 'seatd' 'systemd-libs' 'wayland' 'adwaita-icon-theme')
 makedepends=('cargo' 'git')
 optdepends=('foot: terminal opened by the default Mod+Return binding'
+            'xwayland-satellite: run X11 apps'
+            'polkit-gnome: password prompts for administrator actions'
+            'gnome-keyring: password storage for apps'
+            'pipewire-pulse: sound for apps that use PulseAudio'
+            'qt5-wayland: Qt 5 apps on Wayland'
+            'qt6-wayland: Qt 6 apps on Wayland'
             'nautilus: file manager opened by the desktop icons'
-            'xdg-desktop-portal-gtk: file dialogs and other portals for apps'
             'wireplumber: volume icon in the bar (wpctl)'
             'libnotify: notify-send, for testing notifications'
             'alacritty: alternative terminal')
@@ -66,6 +72,10 @@ package() {
   # run each shell program and restart it if it crashes.
   install -Dm755 packaging/session/meridian-session "$pkgdir/usr/bin/meridian-session"
   install -Dm755 packaging/bin/terra-doctor "$pkgdir/usr/bin/terra-doctor"
+  install -Dm755 packaging/bin/meridian-polkit-agent "$pkgdir/usr/bin/meridian-polkit-agent"
+  # Selects portal backends for XDG_CURRENT_DESKTOP=Meridian.
+  install -Dm644 packaging/portals/meridian-portals.conf \
+    "$pkgdir/usr/share/xdg-desktop-portal/meridian-portals.conf"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" packaging/systemd/*
   # Makes "Meridian" selectable in login managers such as GDM and SDDM.
   install -Dm644 packaging/session/meridian.desktop "$pkgdir/usr/share/wayland-sessions/meridian.desktop"

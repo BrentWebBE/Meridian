@@ -13,6 +13,18 @@ export XDG_SESSION_TYPE=wayland
 # Qt apps: use Wayland, fall back to X11 if that ever becomes available.
 export QT_QPA_PLATFORM="wayland;xcb"
 
+# X11 apps run through xwayland-satellite, if it is installed. It needs a
+# display number nobody else uses; apps find it through DISPLAY.
+if command -v xwayland-satellite >/dev/null 2>&1; then
+    number=0
+    while [ -e "/tmp/.X11-unix/X$number" ] || [ -e "/tmp/.X$number-lock" ]; do
+        number=$((number + 1))
+    done
+    export DISPLAY=":$number"
+else
+    unset DISPLAY
+fi
+
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/meridian"
 mkdir -p "$state_dir"
 log="$state_dir/session.log"
@@ -30,7 +42,7 @@ meridian-comp --session "$@" 2>> "$log"
 status=$?
 
 systemctl --user stop meridian-session.target graphical-session.target 2>/dev/null
-systemctl --user unset-environment WAYLAND_DISPLAY MERIDIAN_SOCKET \
+systemctl --user unset-environment WAYLAND_DISPLAY MERIDIAN_SOCKET DISPLAY \
     XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM 2>/dev/null
 
 exit "$status"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Terra clipboard manager (keeps copied data after its app closes)
+Documentation=https://github.com/BrentWebBE/Meridian
+PartOf=graphical-session.target
+After=graphical-session.target
+# Skipped, not failed, when the program is not installed.
+ConditionPathExists=/usr/bin/wl-clip-persist
+
+[Service]
+ExecStart=/usr/bin/wl-clip-persist --clipboard regular
+Restart=on-failure
+RestartSec=1
