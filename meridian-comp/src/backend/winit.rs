@@ -79,6 +79,8 @@ pub fn attach(
             WinitEvent::Redraw => {
                 // Computed first: these borrow all of `state`, which is not
                 // possible once `state.backend` is borrowed mutably below.
+                let frame_started = state.stats.start_frame();
+                state.stats.reason("host-vsync");
                 let focused = state.focused_window();
                 let overview = state.overview_scene();
                 let Backend::Winit(winit) = &mut state.backend else { return };
@@ -115,6 +117,7 @@ pub fn attach(
                     Err(err) => tracing::warn!("failed to render the frame: {err}"),
                 }
                 winit.graphics.window().request_redraw();
+                state.stats.end_frame(frame_started, false);
 
                 state.after_frame(&output);
             }

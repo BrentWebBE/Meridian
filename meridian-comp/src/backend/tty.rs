@@ -395,11 +395,13 @@ impl Meridian {
             tracing::warn!("frame bookkeeping failed: {err}");
         }
         surface.redraw = Redraw::Idle;
+        self.stats.reason("vblank");
         self.tty_render(crtc);
     }
 
     /// Draw one monitor, if it is ready for a new frame.
     fn tty_render(&mut self, crtc: crtc::Handle) {
+        let frame_started = self.stats.start_frame();
         let pointer_location = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
         let background = self.effects.theme().sky.to_array();
         let focused = self.focused_window();
@@ -453,6 +455,7 @@ impl Meridian {
             }
         };
 
+        self.stats.end_frame(frame_started, !queued);
         let output = surface.output.clone();
         if queued {
             surface.redraw = Redraw::WaitingForVblank;
@@ -479,6 +482,7 @@ impl Meridian {
         {
             surface.redraw = Redraw::Idle;
         }
+        self.stats.reason("poll-timer");
         self.tty_render(crtc);
     }
 

@@ -24,6 +24,7 @@ mod layout;
 mod lock;
 mod overview;
 mod state;
+mod stats;
 
 use anyhow::Context;
 use meridian_common::config::Config;
@@ -126,6 +127,7 @@ fn main() -> anyhow::Result<()> {
         Err(err) => tracing::error!("IPC is unavailable, bar and dock will be limited: {err:#}"),
     }
     state.start_theme_clock();
+    state.start_stats();
     state.init_wallpaper();
     state.watch_config_files();
     state.autostart();

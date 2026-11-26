@@ -57,6 +57,7 @@ use crate::{
     effects::Effects,
     grabs::ResizeState,
     lock::Lock,
+    stats::{self, Stats},
     ipc::IpcServer,
     keys::{self, Binding},
     layout::{self, Layout, Rect},
@@ -111,6 +112,9 @@ pub struct Meridian {
     pub cursor_status: CursorImageStatus,
     /// The interactive resize in progress, if any (see grabs.rs).
     pub resize: Option<ResizeState>,
+
+    /// Debug statistics, off unless MERIDIAN_STATS is set (stats.rs).
+    pub stats: Stats,
 
     /// Session lock state, see lock.rs.
     pub lock: Lock,
@@ -221,6 +225,7 @@ impl Meridian {
             focused_surface: None,
             cursor_status: CursorImageStatus::default_named(),
             resize: None,
+            stats: Stats::from_env(),
             lock: Lock::default(),
             session_lock_state,
             ipc: IpcServer::default(),
@@ -621,6 +626,31 @@ impl Meridian {
         });
     }
 
+    /// With statistics enabled, write a report every second. When they are
+    /// off no timer is created, so this costs nothing.
+    pub fn start_stats(&self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        if !self.stats.enabled() {
+            return;
+        }
+        let started = self
+            .loop_handle
+            .insert_source(Timer::from_duration(stats::REPORT_EVERY), |_, _, state| {
+                // Windows plus bar, dock and other layer surfaces.
+                let layers: usize = state
+                    .space
+                    .outputs()
+                    .map(|output| layer_map_for_output(output).len())
+                    .sum();
+                let surfaces = state.windows.len() + layers;
+                state.stats.report(surfaces);
+                TimeoutAction::ToDuration(stats::REPORT_EVERY)
+            });
+        if started.is_err() {
+            tracing::warn!("could not start the statistics timer");
+        }
+    }
+
     /// Check once a minute whether the time of day calls for another theme.
     pub fn start_theme_clock(&self) {
         use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -751,13 +781,16 @@ impl Meridian {
         // Frame callbacks tell clients "now is a good time to draw the next
         // frame". Without them most clients stop updating.
         let elapsed = self.start_time.elapsed();
+        let mut callbacks = 0;
         for window in self.space.elements_for_output(output) {
             window.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+            callbacks += 1;
         }
         {
             let mut layers = layer_map_for_output(output);
             for layer in layers.layers() {
                 layer.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+                callbacks += 1;
             }
             layers.cleanup(); // forget closed layer surfaces
         }
@@ -767,6 +800,8 @@ impl Meridian {
             });
         }
 
+        // Counted per surface we signalled, whether or not it was waiting.
+        self.stats.frame_callbacks(callbacks);
         self.lock_after_frame(output);
 
         // Forget closed windows and popups, then flush outgoing messages.
