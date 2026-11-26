@@ -57,6 +57,7 @@ use crate::{
     effects::Effects,
     grabs::ResizeState,
     lock::Lock,
+    stats::{self, Stats},
     ipc::IpcServer,
     keys::{self, Binding},
     layout::{self, Layout, Rect},
@@ -111,6 +112,9 @@ pub struct Meridian {
     pub cursor_status: CursorImageStatus,
     /// The interactive resize in progress, if any (see grabs.rs).
     pub resize: Option<ResizeState>,
+
+    /// Debug statistics, off unless MERIDIAN_STATS is set (stats.rs).
+    pub stats: Stats,
 
     /// Session lock state, see lock.rs.
     pub lock: Lock,
@@ -193,7 +197,7 @@ impl Meridian {
 
         let themes = Themes::load();
         let mood = config.appearance.current_mood(current_hour());
-        let effects = Effects::compile(backend.renderer(), themes.get(mood))?;
+        let effects = Effects::compile(backend.renderer(), themes.get(mood), config.effects)?;
         let socket_name = init_wayland_socket(display, event_loop)?;
         let bindings = keys::parse_bindings(&config.keybindings, backend.mod_is_logo());
         let layout = layout::from_kind(config.layout, &config);
@@ -221,6 +225,7 @@ impl Meridian {
             focused_surface: None,
             cursor_status: CursorImageStatus::default_named(),
             resize: None,
+            stats: Stats::from_env(),
             lock: Lock::default(),
             session_lock_state,
             ipc: IpcServer::default(),
@@ -486,6 +491,7 @@ impl Meridian {
         self.bindings = keys::parse_bindings(&config.keybindings, self.backend.mod_is_logo());
         let layout_changed = config.layout != self.layout.kind();
         let new_layout = config.layout;
+        self.effects.set_flags(config.effects);
         self.config = config;
         self.themes = Themes::load();
         self.config_generation += 1;
@@ -569,6 +575,7 @@ impl Meridian {
         if theme != self.effects.theme() {
             tracing::info!("mood: {}", mood.name());
             self.effects.set_theme(theme);
+            self.queue_redraw("mood");
             self.ipc_broadcast();
         }
     }
@@ -580,9 +587,23 @@ impl Meridian {
         let (sender, receiver) = channel::<WallpaperImage>();
         let inserted = self.loop_handle.insert_source(receiver, |event, _, state| {
             if let ChannelEvent::Msg(image) = event {
-                state
-                    .effects
-                    .set_wallpaper_image(state.backend.renderer(), &image.pixels, image.width, image.height);
+                match image.landscape {
+                    // The drawn landscape, painted for one size and theme.
+                    Some(theme) => state.effects.set_landscape(
+                        state.backend.renderer(),
+                        &image.pixels,
+                        (image.width as i32, image.height as i32).into(),
+                        theme,
+                    ),
+                    // The user's own picture.
+                    None => state.effects.set_wallpaper_image(
+                        state.backend.renderer(),
+                        &image.pixels,
+                        image.width,
+                        image.height,
+                    ),
+                }
+                state.queue_redraw("wallpaper");
             }
         });
         if inserted.is_ok() {
@@ -598,6 +619,7 @@ impl Meridian {
         let path = self.config.appearance.wallpaper.trim().to_string();
         if path.is_empty() {
             self.effects.clear_wallpaper_image();
+            self.queue_redraw("wallpaper");
             return;
         }
         let Some(sender) = self.wallpaper_sender.clone() else { return };
@@ -615,10 +637,36 @@ impl Meridian {
                     pixels: image.into_raw(),
                     width,
                     height,
+                    landscape: None,
                 });
             }
             Err(err) => tracing::error!("wallpaper {}: {err}", path.display()),
         });
+    }
+
+    /// With statistics enabled, write a report every second. When they are
+    /// off no timer is created, so this costs nothing.
+    pub fn start_stats(&self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        if !self.stats.enabled() {
+            return;
+        }
+        let started = self
+            .loop_handle
+            .insert_source(Timer::from_duration(stats::REPORT_EVERY), |_, _, state| {
+                // Windows plus bar, dock and other layer surfaces.
+                let layers: usize = state
+                    .space
+                    .outputs()
+                    .map(|output| layer_map_for_output(output).len())
+                    .sum();
+                let surfaces = state.windows.len() + layers;
+                state.stats.report(surfaces);
+                TimeoutAction::ToDuration(stats::REPORT_EVERY)
+            });
+        if started.is_err() {
+            tracing::warn!("could not start the statistics timer");
+        }
     }
 
     /// Check once a minute whether the time of day calls for another theme.
@@ -702,9 +750,74 @@ impl Meridian {
         }
     }
 
+    /// Run as a systemd user session: publish our environment to systemd
+    /// and D-Bus, then start `meridian-session.target`, which pulls in the
+    /// shell programs as units that are restarted when they crash.
+    ///
+    /// Both steps talk to other processes and can take a while, so they
+    /// run on a worker thread. If they fail, the result comes back through
+    /// a channel and we start the shell programs ourselves instead.
+    pub fn start_systemd_session(&mut self) {
+        let (sender, receiver) = channel::<bool>();
+        let inserted = self.loop_handle.insert_source(receiver, |event, _, state| {
+            if let ChannelEvent::Msg(started) = event {
+                if started {
+                    tracing::info!("meridian-session.target started");
+                    // Our own programs are units now; start only what the
+                    // user added to `autostart`.
+                    state.autostart_matching(|program| !program.starts_with("meridian-"));
+                } else {
+                    tracing::error!("could not start the systemd session; starting the shell programs directly");
+                    state.autostart();
+                }
+            }
+        });
+        if inserted.is_err() {
+            self.autostart();
+            return;
+        }
+
+        // What the units and D-Bus-activated services need to find us.
+        let mut variables = vec![
+            format!("WAYLAND_DISPLAY={}", self.socket_name.to_string_lossy()),
+            "XDG_CURRENT_DESKTOP=Meridian".to_string(),
+            "XDG_SESSION_TYPE=wayland".to_string(),
+            "XDG_SESSION_DESKTOP=meridian".to_string(),
+        ];
+        if let Some(socket) = &self.ipc_socket {
+            variables.push(format!("{}={}", meridian_common::ipc::SOCKET_ENV, socket.display()));
+        }
+        if let Ok(platform) = std::env::var("QT_QPA_PLATFORM") {
+            variables.push(format!("QT_QPA_PLATFORM={platform}"));
+        }
+
+        std::thread::spawn(move || {
+            let run = |program: &str, args: &[&str]| {
+                Command::new(program)
+                    .args(args)
+                    .status()
+                    .is_ok_and(|status| status.success())
+            };
+            // `--systemd` updates the systemd user manager as well as D-Bus.
+            let mut export = vec!["--systemd"];
+            export.extend(variables.iter().map(String::as_str));
+            let started = run("dbus-update-activation-environment", &export)
+                && run("systemctl", &["--user", "start", "meridian-session.target"]);
+            let _ = sender.send(started);
+        });
+    }
+
     /// Start the programs listed under `autostart` in the config.
     pub fn autostart(&self) {
+        self.autostart_matching(|_| true);
+    }
+
+    /// Start the `autostart` programs whose name passes `wanted`.
+    fn autostart_matching(&self, wanted: impl Fn(&str) -> bool) {
         for command_line in &self.config.autostart {
+            if !command_line.split_whitespace().next().is_some_and(&wanted) {
+                continue;
+            }
             let mut parts = command_line.split_whitespace().map(String::from);
             if let Some(program) = parts.next() {
                 let args: Vec<String> = parts.collect();
@@ -751,13 +864,16 @@ impl Meridian {
         // Frame callbacks tell clients "now is a good time to draw the next
         // frame". Without them most clients stop updating.
         let elapsed = self.start_time.elapsed();
+        let mut callbacks = 0;
         for window in self.space.elements_for_output(output) {
             window.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+            callbacks += 1;
         }
         {
             let mut layers = layer_map_for_output(output);
             for layer in layers.layers() {
                 layer.send_frame(output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+                callbacks += 1;
             }
             layers.cleanup(); // forget closed layer surfaces
         }
@@ -767,6 +883,24 @@ impl Meridian {
             });
         }
 
+        // If the last frame had to use the wallpaper shader because the
+        // ready-made landscape was missing, paint it now on a worker thread.
+        if let Some((size, theme)) = self.effects.take_landscape_request()
+            && let Some(sender) = self.wallpaper_sender.clone()
+        {
+            std::thread::spawn(move || {
+                let pixels = crate::effects::paint_landscape(size.w, size.h, &theme);
+                let _ = sender.send(WallpaperImage {
+                    pixels,
+                    width: size.w as u32,
+                    height: size.h as u32,
+                    landscape: Some(theme),
+                });
+            });
+        }
+
+        // Counted per surface we signalled, whether or not it was waiting.
+        self.stats.frame_callbacks(callbacks);
         self.lock_after_frame(output);
 
         // Forget closed windows and popups, then flush outgoing messages.
@@ -781,6 +915,9 @@ pub struct WallpaperImage {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// `Some(theme)` if this is the drawn landscape for that theme rather
+    /// than the user's picture.
+    pub landscape: Option<meridian_common::theme::Theme>,
 }
 
 /// The hour of the day (0-23) in local time.

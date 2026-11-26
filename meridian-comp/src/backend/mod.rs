@@ -194,8 +194,15 @@ pub fn output_elements(renderer: &mut GlesRenderer, output: &Output, scene: &Sce
 
     // 4. Desktop layers from clients, then our own wallpaper at the very bottom.
     layer_elements(renderer, output, scale, &[Layer::Bottom, Layer::Background], &mut elements);
-    // The user's image if there is one, otherwise the drawn landscape.
-    match scene.effects.wallpaper_image(output_geo.size) {
+    // The user's image if there is one; otherwise the drawn landscape,
+    // as a ready-made texture once a worker thread has painted it, and
+    // through the shader until then.
+    let physical = output.current_mode().map(|mode| mode.size).unwrap_or_default();
+    let ready = scene
+        .effects
+        .wallpaper_image(output_geo.size)
+        .or_else(|| scene.effects.landscape(physical, output_geo.size));
+    match ready {
         Some(image) => elements.push(OutputElement::Texture(image)),
         None => elements.push(OutputElement::Shader(scene.effects.wallpaper(output, output_geo.size))),
     }
@@ -272,6 +279,31 @@ fn window_elements(
             decorations::titlebar_element(renderer, window, frame.loc, frame.size.w, focused, effects.theme(), scale)
     {
         elements.push(OutputElement::CursorImage(titlebar));
+    }
+
+    // With rounded corners off, the window's surfaces are drawn as they
+    // are: no off-screen texture, no shader.
+    if !effects.flags().rounded_corners {
+        let origin: Point<i32, Physical> = (rect.loc - window.geometry().loc).to_physical_precise_round(scale);
+        elements.extend(
+            render_elements_from_surface_tree(
+                renderer,
+                toplevel.wl_surface(),
+                origin,
+                Scale::from(scale),
+                1.0,
+                Kind::Unspecified,
+            )
+            .into_iter()
+            .map(OutputElement::Surface),
+        );
+        elements.extend(
+            effects
+                .window_backdrop(window, frame, focused)
+                .into_iter()
+                .map(OutputElement::Shader),
+        );
+        return;
     }
 
     let body = effects::with_window_texture(renderer, window, scale, |texture| {

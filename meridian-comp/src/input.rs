@@ -37,6 +37,8 @@ impl Meridian {
     // `I: InputBackend` makes this generic: the same code handles events from
     // the host window (winit) and from real devices (libinput).
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        // Input usually changes what is on screen (at least the cursor).
+        self.queue_redraw("input");
         match event {
             InputEvent::Keyboard { event, .. } => self.on_key::<I>(event),
             // Real mice report movement ("3 px right"), the nested window

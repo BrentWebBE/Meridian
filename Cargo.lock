@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-bar"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-common"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-comp"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "cairo-rs",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-desktop"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "gtk4",
  "gtk4-layer-shell",
@@ -1483,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-dock"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "glib-unix",
  "gtk4",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-launcher"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-channel",
  "glib-unix",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-lock"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-channel",
  "gtk4",
@@ -1517,7 +1517,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-notify"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-channel",
  "glib-unix",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "meridian-settings"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "gtk4",
  "meridian-common",

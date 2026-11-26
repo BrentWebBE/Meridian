@@ -8,7 +8,7 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.12.0
+pkgver=0.13.0
 pkgrel=1
 pkgdesc="The Terra desktop: a Wayland compositor, bar, dock, launcher, settings and lock screen in Rust"
 arch=('x86_64' 'aarch64')
@@ -52,6 +52,7 @@ package() {
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 STABILIZATION.md "$pkgdir/usr/share/doc/$pkgname/STABILIZATION.md"
   # Example configuration (the same file the built-in defaults come from).
   install -Dm644 meridian-common/resources/default-config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
   # The three moods' colors, as a template for ~/.config/meridian/themes.toml.
@@ -61,6 +62,11 @@ package() {
   # Lets Find and the dock list the Settings app.
   install -Dm644 packaging/applications/org.meridian.Settings.desktop \
     "$pkgdir/usr/share/applications/org.meridian.Settings.desktop"
+  # The session: a script for login managers, and systemd user units that
+  # run each shell program and restart it if it crashes.
+  install -Dm755 packaging/session/meridian-session "$pkgdir/usr/bin/meridian-session"
+  install -Dm755 packaging/bin/terra-doctor "$pkgdir/usr/bin/terra-doctor"
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" packaging/systemd/*
   # Makes "Meridian" selectable in login managers such as GDM and SDDM.
   install -Dm644 packaging/session/meridian.desktop "$pkgdir/usr/share/wayland-sessions/meridian.desktop"
 }

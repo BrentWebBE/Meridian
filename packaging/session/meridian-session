@@ -1,0 +1,36 @@
+#!/bin/sh
+# Starts a Terra (Meridian) session. Used by login managers through
+# /usr/share/wayland-sessions/meridian.desktop, and works from a text
+# console too:  meridian-session
+#
+# It sets the session's environment, runs the compositor, and when the
+# compositor exits (logout or crash) stops the session's systemd units and
+# takes our variables out of the systemd user environment again.
+
+export XDG_CURRENT_DESKTOP=Meridian
+export XDG_SESSION_DESKTOP=meridian
+export XDG_SESSION_TYPE=wayland
+# Qt apps: use Wayland, fall back to X11 if that ever becomes available.
+export QT_QPA_PLATFORM="wayland;xcb"
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/meridian"
+mkdir -p "$state_dir"
+log="$state_dir/session.log"
+# Keep the previous session's log for when something went wrong.
+[ -f "$log" ] && mv -f "$log" "$log.old"
+
+# Leftovers from a session that did not end cleanly.
+systemctl --user stop meridian-session.target 2>/dev/null
+systemctl --user reset-failed 'meridian-*' 2>/dev/null
+
+# `--session` tells the compositor it runs under this script: it then
+# publishes its environment to systemd and D-Bus and starts
+# meridian-session.target instead of starting the shell programs itself.
+meridian-comp --session "$@" 2>> "$log"
+status=$?
+
+systemctl --user stop meridian-session.target graphical-session.target 2>/dev/null
+systemctl --user unset-environment WAYLAND_DISPLAY MERIDIAN_SOCKET \
+    XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM 2>/dev/null
+
+exit "$status"

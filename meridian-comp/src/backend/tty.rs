@@ -65,8 +65,6 @@ type KmsOutput = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
 /// Pixel formats we are willing to scan out, best first.
 const COLOR_FORMATS: &[Fourcc] = &[Fourcc::Argb8888, Fourcc::Abgr8888];
 
-/// How long to wait before checking for new content when nothing changed.
-const IDLE_POLL: Duration = Duration::from_millis(16);
 
 pub struct Tty {
     pub session: LibSeatSession,
@@ -91,14 +89,25 @@ struct Surface {
 }
 
 /// Where a monitor is in its draw cycle.
+///
+/// Nothing is drawn on a schedule. Something asks for a redraw
+/// (`queue_redraw`: a client committed, the pointer moved, a setting
+/// changed), we draw once, hand the frame to the kernel, and wait for the
+/// monitor to show it (VBlank) before drawing again. That keeps us exactly
+/// in step with the monitor's refresh rate and idle when nothing changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Redraw {
-    /// Nothing scheduled: `tty_render` may draw now.
+    /// Nothing to do.
     Idle,
-    /// A frame was handed to the kernel; wait for the VBlank event.
-    WaitingForVblank,
-    /// Nothing had changed; a timer will try again shortly.
-    WaitingForTimer,
+    /// A redraw was requested and will run as soon as the event loop is free.
+    Queued,
+    /// A frame was handed to the kernel; waiting for the VBlank event.
+    /// `again`: something changed meanwhile, so draw again right after.
+    WaitingForVblank { again: bool },
+    /// We drew but nothing had changed, so no frame was shown and no VBlank
+    /// will come. A timer stands in for it, so clients still get their
+    /// "time to draw the next frame" signal.
+    WaitingForTimer { again: bool },
 }
 
 impl Tty {
@@ -283,14 +292,23 @@ impl Meridian {
 
         let name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
 
-        // A "mode" is resolution + refresh rate. Take the monitor's preferred one.
+        // A "mode" is resolution + refresh rate. Start from the monitor's
+        // preferred mode, then take the fastest refresh rate it offers at
+        // that resolution (many 120 Hz panels "prefer" their 60 Hz mode).
         let modes = connector.modes();
-        let Some(drm_mode) = modes
+        let preferred = modes
             .iter()
             .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
             .or(modes.first())
-            .copied()
-        else {
+            .copied();
+        let Some(drm_mode) = preferred.map(|preferred| {
+            modes
+                .iter()
+                .filter(|mode| mode.size() == preferred.size())
+                .max_by_key(|mode| mode.vrefresh())
+                .copied()
+                .unwrap_or(preferred)
+        }) else {
             tracing::warn!("monitor {name} reports no modes, skipping it");
             return;
         };
@@ -370,7 +388,7 @@ impl Meridian {
                 output,
                 kms,
                 global,
-                redraw: Redraw::Idle,
+                redraw: Redraw::Queued,
             },
         );
 
@@ -386,7 +404,34 @@ impl Meridian {
         }
     }
 
-    /// The monitor has shown our frame: we may draw the next one.
+    /// Ask for every monitor to be redrawn soon. Cheap to call often:
+    /// requests made while a frame is in flight are merged into one.
+    pub fn queue_redraw(&mut self, reason: &'static str) {
+        self.stats.reason(reason);
+        let tty = match &mut self.backend {
+            Backend::Tty(tty) => tty,
+            Backend::Winit(winit) => {
+                winit.queue_redraw();
+                return;
+            }
+        };
+        for (crtc, surface) in tty.surfaces.iter_mut() {
+            match &mut surface.redraw {
+                Redraw::Idle => {
+                    surface.redraw = Redraw::Queued;
+                    let crtc = *crtc;
+                    // `insert_idle` runs the closure once the event loop has
+                    // handled everything that is pending right now, so many
+                    // changes in one batch cause a single redraw.
+                    self.loop_handle.insert_idle(move |state| state.tty_render(crtc));
+                }
+                Redraw::Queued => {}
+                Redraw::WaitingForVblank { again } | Redraw::WaitingForTimer { again } => *again = true,
+            }
+        }
+    }
+
+    /// The monitor has shown our frame.
     fn tty_vblank(&mut self, crtc: crtc::Handle) {
         let Backend::Tty(tty) = &mut self.backend else { return };
         let Some(surface) = tty.surfaces.get_mut(&crtc) else { return };
@@ -394,12 +439,41 @@ impl Meridian {
         if let Err(err) = surface.kms.frame_submitted() {
             tracing::warn!("frame bookkeeping failed: {err}");
         }
+        let again = matches!(surface.redraw, Redraw::WaitingForVblank { again: true });
         surface.redraw = Redraw::Idle;
-        self.tty_render(crtc);
+        self.tty_frame_done(crtc, again);
     }
 
-    /// Draw one monitor, if it is ready for a new frame.
+    /// The stand-in for VBlank after a frame in which nothing changed.
+    fn tty_timer_fired(&mut self, crtc: crtc::Handle) {
+        let Backend::Tty(tty) = &mut self.backend else { return };
+        let Some(surface) = tty.surfaces.get_mut(&crtc) else { return };
+        let Redraw::WaitingForTimer { again } = surface.redraw else {
+            return; // the state moved on (for example the session was paused)
+        };
+        surface.redraw = Redraw::Idle;
+        self.tty_frame_done(crtc, again);
+    }
+
+    /// A frame cycle ended: tell clients they may draw their next frame, and
+    /// draw again ourselves if something changed in the meantime.
+    fn tty_frame_done(&mut self, crtc: crtc::Handle, again: bool) {
+        let Backend::Tty(tty) = &mut self.backend else { return };
+        let Some(surface) = tty.surfaces.get_mut(&crtc) else { return };
+        let output = surface.output.clone();
+        if again {
+            surface.redraw = Redraw::Queued;
+        }
+
+        self.after_frame(&output);
+        if again {
+            self.tty_render(crtc);
+        }
+    }
+
+    /// Draw one monitor. Only runs when a redraw is queued for it.
     fn tty_render(&mut self, crtc: crtc::Handle) {
+        let frame_started = self.stats.start_frame();
         let pointer_location = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
         let background = self.effects.theme().sky.to_array();
         let focused = self.focused_window();
@@ -409,11 +483,13 @@ impl Meridian {
         // fields, so Rust lets us borrow one mutably and the others immutably
         // at the same time.
         let Backend::Tty(tty) = &mut self.backend else { return };
-        if !tty.active {
+        let Some(surface) = tty.surfaces.get_mut(&crtc) else { return };
+        if surface.redraw != Redraw::Queued {
             return;
         }
-        let Some(surface) = tty.surfaces.get_mut(&crtc) else { return };
-        if surface.redraw == Redraw::WaitingForVblank {
+        if !tty.active {
+            // On another VT: forget the request, `ActivateSession` asks again.
+            surface.redraw = Redraw::Idle;
             return;
         }
 
@@ -431,12 +507,17 @@ impl Meridian {
         };
         let elements = output_elements(&mut tty.renderer, &surface.output, &scene);
 
+        let frame_flags = if self.config.effects.direct_scanout {
+            FrameFlags::DEFAULT
+        } else {
+            FrameFlags::empty()
+        };
         // `FrameFlags::empty()`: always composite with OpenGL. Direct scanout
         // (handing client buffers straight to the monitor) is faster but is
         // where driver bugs live, so it stays off until this is tested widely.
         let queued = match surface
             .kms
-            .render_frame(&mut tty.renderer, &elements, background, FrameFlags::empty())
+            .render_frame(&mut tty.renderer, &elements, background, frame_flags)
         {
             // `is_empty`: nothing changed since the last frame, nothing to show.
             Ok(frame) if frame.is_empty => false,
@@ -453,33 +534,24 @@ impl Meridian {
             }
         };
 
-        let output = surface.output.clone();
+        self.stats.end_frame(frame_started, !queued);
         if queued {
-            surface.redraw = Redraw::WaitingForVblank;
-        } else if surface.redraw != Redraw::WaitingForTimer {
-            // No page flip means no VBlank event will wake us, so use a timer.
-            surface.redraw = Redraw::WaitingForTimer;
-            let timer = Timer::from_duration(IDLE_POLL);
-            let armed = self.loop_handle.insert_source(timer, move |_, _, state| {
+            surface.redraw = Redraw::WaitingForVblank { again: false };
+        } else {
+            // No frame was shown, so no VBlank will come. Wait one refresh
+            // interval instead, then finish the cycle the same way.
+            surface.redraw = Redraw::WaitingForTimer { again: false };
+            let refresh_mhz = surface.output.current_mode().map_or(60_000, |mode| mode.refresh.max(1));
+            let interval = Duration::from_secs_f64(1000.0 / refresh_mhz as f64);
+            let armed = self.loop_handle.insert_source(Timer::from_duration(interval), move |_, _, state| {
                 state.tty_timer_fired(crtc);
                 TimeoutAction::Drop // one-shot
             });
             if armed.is_err() {
-                tracing::error!("could not arm the redraw timer");
+                tracing::error!("could not arm the frame timer");
+                surface.redraw = Redraw::Idle;
             }
         }
-
-        self.after_frame(&output);
-    }
-
-    fn tty_timer_fired(&mut self, crtc: crtc::Handle) {
-        if let Backend::Tty(tty) = &mut self.backend
-            && let Some(surface) = tty.surfaces.get_mut(&crtc)
-            && surface.redraw == Redraw::WaitingForTimer
-        {
-            surface.redraw = Redraw::Idle;
-        }
-        self.tty_render(crtc);
     }
 
     /// The user switched away from (pause) or back to (activate) our VT.
@@ -503,15 +575,12 @@ impl Meridian {
                 }
                 tty.active = true;
 
-                let crtcs: Vec<crtc::Handle> = tty.surfaces.keys().copied().collect();
                 for surface in tty.surfaces.values_mut() {
                     surface.redraw = Redraw::Idle;
                 }
                 // Monitors may have changed while we were away.
                 self.tty_scan_connectors();
-                for crtc in crtcs {
-                    self.tty_render(crtc);
-                }
+                self.queue_redraw("resume");
             }
         }
     }

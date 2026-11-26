@@ -1,0 +1,14 @@
+[Unit]
+Description=Terra (Meridian) desktop session
+Documentation=https://github.com/BrentWebBE/Meridian
+# Starting this target starts systemd's standard graphical session target
+# with it, and stopping either stops both. Services from other packages
+# that hook into graphical-session.target (portal backends, agents) then
+# start with a Terra session too.
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+# The shell. Each is its own unit so that one crashing does not take the
+# others or the compositor down, and systemd starts it again.
+Wants=meridian-bar.service meridian-dock.service meridian-desktop.service
+Wants=meridian-notify.service meridian-launcher.service

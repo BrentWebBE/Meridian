@@ -24,6 +24,7 @@ mod layout;
 mod lock;
 mod overview;
 mod state;
+mod stats;
 
 use anyhow::Context;
 use meridian_common::config::Config;
@@ -38,8 +39,9 @@ Runs the Meridian compositor with the Terra desktop. Inside another desktop
 it opens as a window (nested); from a text console or login manager it takes
 over the screen.
 
-  --winit     force nested mode
-  --tty       force a real session
+  --winit     force nested dev mode (NOT a full session)
+  --tty       force a real session on this console
+  --session   real session under systemd; use the `meridian-session` script
   COMMAND     program to start as the first client, e.g. `meridian-comp foot`
 
 Default keys (Mod = Alt when nested, Super in a real session):
@@ -68,24 +70,29 @@ fn main() -> anyhow::Result<()> {
 
     // Nested if we were started from inside a graphical session.
     let mut nested = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
-    match args.first().map(String::as_str) {
-        Some("-h" | "--help") => {
-            println!("{HELP}");
-            return Ok(());
+    // Set by the `meridian-session` script: we are a login session and
+    // systemd runs the shell programs.
+    let mut managed = false;
+    // Leading flags; everything after them is the command to start.
+    while let Some(flag) = args.first().map(String::as_str) {
+        match flag {
+            "-h" | "--help" => {
+                println!("{HELP}");
+                return Ok(());
+            }
+            "-V" | "--version" => {
+                println!("meridian-comp {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "--winit" => nested = true,
+            "--tty" => nested = false,
+            "--session" => {
+                managed = true;
+                nested = false;
+            }
+            _ => break,
         }
-        Some("-V" | "--version") => {
-            println!("meridian-comp {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        Some("--winit") => {
-            nested = true;
-            args.remove(0);
-        }
-        Some("--tty") => {
-            nested = false;
-            args.remove(0);
-        }
-        _ => {}
+        args.remove(0);
     }
 
     init_logging();
@@ -112,7 +119,6 @@ fn main() -> anyhow::Result<()> {
         let tty = backend::tty::init(&event_loop)?;
         let mut state = Meridian::new(&mut event_loop, display, Backend::Tty(Box::new(tty)), config)?;
         state.tty_scan_connectors();
-        export_session_environment(&state.socket_name);
         state
     };
 
@@ -126,51 +132,44 @@ fn main() -> anyhow::Result<()> {
         Err(err) => tracing::error!("IPC is unavailable, bar and dock will be limited: {err:#}"),
     }
     state.start_theme_clock();
+    state.start_stats();
     state.init_wallpaper();
     state.watch_config_files();
-    state.autostart();
+
+    if nested {
+        // Say it loudly: this is a development aid, not the desktop.
+        tracing::warn!(
+            "NESTED DEV MODE: running as a window inside another desktop. This is not a full \
+             session: no systemd units, no portals, no polkit agent, and speed is limited by \
+             the host. Log in through `meridian-session` to judge the real thing."
+        );
+        state.autostart();
+    } else if managed {
+        state.start_systemd_session();
+    } else {
+        tracing::warn!(
+            "started without the `meridian-session` script: shell programs run as plain child \
+             processes and are not restarted if they crash"
+        );
+        state.autostart();
+    }
 
     if let Some((program, rest)) = args.split_first() {
         state.spawn(program, rest);
     }
 
     // Blocks until `loop_signal.stop()` is called.
+    // The closure runs after every pass of the loop. Sending queued
+    // messages to clients here, and not only after a frame, matters now
+    // that frames are drawn on demand: a client waiting for an answer
+    // (for example while starting up) must get it even if nothing is drawn.
     event_loop
-        .run(None, &mut state, |_| {})
+        .run(None, &mut state, |state| {
+            let _ = state.display_handle.flush_clients();
+        })
         .context("event loop failed")?;
 
     Ok(())
-}
-
-/// In a real session, tell systemd and D-Bus which Wayland display is ours.
-/// Programs they start on demand (portals, notification senders, apps
-/// launched by D-Bus activation) would otherwise not find the desktop.
-fn export_session_environment(socket_name: &std::ffi::OsStr) {
-    let commands: [&[&str]; 2] = [
-        &["systemctl", "--user", "import-environment", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"],
-        &[
-            "dbus-update-activation-environment",
-            "--systemd",
-            "WAYLAND_DISPLAY",
-            "XDG_CURRENT_DESKTOP",
-        ],
-    ];
-    for command in commands {
-        // `spawn` does not wait: startup must not hang on these.
-        let spawned = std::process::Command::new(command[0])
-            .args(&command[1..])
-            .env("WAYLAND_DISPLAY", socket_name)
-            .env("XDG_CURRENT_DESKTOP", "Meridian")
-            .spawn();
-        match spawned {
-            Ok(mut child) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-            }
-            Err(err) => tracing::warn!("could not run {}: {err}", command[0]),
-        }
-    }
 }
 
 /// Log to stderr. Set `RUST_LOG=debug` (or `RUST_LOG=smithay=trace`) for more.

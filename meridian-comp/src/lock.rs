@@ -52,6 +52,8 @@ impl SessionLockHandler for Meridian {
         // From the next frame on only lock surfaces are drawn, so we can
         // confirm: the client may now show its unlock dialog.
         confirmation.lock();
+        self.queue_redraw("lock");
+        self.start_lock_watchdog();
     }
 
     fn unlock(&mut self) {
@@ -60,6 +62,7 @@ impl SessionLockHandler for Meridian {
         self.lock.surfaces.clear();
         let top = self.space.elements().next_back().cloned();
         self.focus_window(top.as_ref());
+        self.queue_redraw("lock");
     }
 
     /// The lock program created its surface for one monitor.
@@ -79,6 +82,7 @@ impl SessionLockHandler for Meridian {
         }
         self.lock.surfaces.retain(|(other, _)| *other != output);
         self.lock.surfaces.push((output, surface));
+        self.queue_redraw("lock");
     }
 }
 
@@ -102,8 +106,32 @@ impl Meridian {
             .map(|(_, surface)| (surface.wl_surface().clone(), origin.to_f64()))
     }
 
-    /// Called after each frame: keep the lock surfaces animating, and bring
-    /// the lock program back if it died while the session is locked.
+    /// While locked, check once a second that the lock program is still
+    /// there, and bring it back if it died. A timer rather than a per-frame
+    /// check, because a locked, idle screen draws no frames.
+    fn start_lock_watchdog(&mut self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let timer = Timer::from_duration(Duration::from_secs(1));
+        let started = self.loop_handle.insert_source(timer, |_, _, state| {
+            if !state.lock.locked {
+                return TimeoutAction::Drop; // unlocked: the watchdog ends
+            }
+            let none_alive = !state.lock.surfaces.iter().any(|(_, surface)| surface.alive());
+            let waited = state.lock.started.is_none_or(|started| started.elapsed() > RESTART_AFTER);
+            if none_alive && waited {
+                tracing::warn!("the lock screen is gone while the session is locked; starting it again");
+                state.lock.started = Some(Instant::now());
+                state.spawn("meridian-lock", &[]);
+                state.queue_redraw("lock"); // show the blank backdrop meanwhile
+            }
+            TimeoutAction::ToDuration(Duration::from_secs(1))
+        });
+        if started.is_err() {
+            tracing::error!("could not start the lock watchdog");
+        }
+    }
+
+    /// Called after each frame: keep the lock surfaces animating.
     pub fn lock_after_frame(&mut self, output: &Output) {
         if !self.lock.locked {
             return;
@@ -115,14 +143,6 @@ impl Meridian {
                     Some(output.clone())
                 });
             }
-        }
-
-        let none_alive = !self.lock.surfaces.iter().any(|(_, surface)| surface.alive());
-        let waited = self.lock.started.is_none_or(|started| started.elapsed() > RESTART_AFTER);
-        if none_alive && waited {
-            tracing::warn!("the lock screen is gone while the session is locked; starting it again");
-            self.lock.started = Some(Instant::now());
-            self.spawn("meridian-lock", &[]);
         }
     }
 }

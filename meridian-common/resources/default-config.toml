@@ -45,6 +45,12 @@ scale = 0
 gap = 12              # pixels between tiled windows
 master-ratio = 0.55   # share of the width for the first window
 
+[effects]
+# Each of these costs nothing when off.
+rounded-corners = true    # needs one off-screen pass per window
+shadows = true
+direct-scanout = false    # faster, but off until measured stable (real session only)
+
 [desktop]
 # Home, Documents, Projects and Trash in the top-left corner.
 icons = true
