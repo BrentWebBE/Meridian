@@ -8,7 +8,7 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.12.1
+pkgver=0.13.0
 pkgrel=1
 pkgdesc="The Terra desktop: a Wayland compositor, bar, dock, launcher, settings and lock screen in Rust"
 arch=('x86_64' 'aarch64')
@@ -52,6 +52,7 @@ package() {
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 STABILIZATION.md "$pkgdir/usr/share/doc/$pkgname/STABILIZATION.md"
   # Example configuration (the same file the built-in defaults come from).
   install -Dm644 meridian-common/resources/default-config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
   # The three moods' colors, as a template for ~/.config/meridian/themes.toml.
