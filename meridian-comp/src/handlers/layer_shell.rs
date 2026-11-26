@@ -60,6 +60,7 @@ impl WlrLayerShellHandler for Meridian {
         }
         // The reserved space is free again.
         self.apply_layout();
+        self.queue_redraw("layer");
 
         // If it held the keyboard (a closing launcher), hand the keyboard
         // back to the topmost window.

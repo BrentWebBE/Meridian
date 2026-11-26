@@ -159,8 +159,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Blocks until `loop_signal.stop()` is called.
+    // The closure runs after every pass of the loop. Sending queued
+    // messages to clients here, and not only after a frame, matters now
+    // that frames are drawn on demand: a client waiting for an answer
+    // (for example while starting up) must get it even if nothing is drawn.
     event_loop
-        .run(None, &mut state, |_| {})
+        .run(None, &mut state, |state| {
+            let _ = state.display_handle.flush_clients();
+        })
         .context("event loop failed")?;
 
     Ok(())

@@ -197,7 +197,7 @@ impl Meridian {
 
         let themes = Themes::load();
         let mood = config.appearance.current_mood(current_hour());
-        let effects = Effects::compile(backend.renderer(), themes.get(mood))?;
+        let effects = Effects::compile(backend.renderer(), themes.get(mood), config.effects)?;
         let socket_name = init_wayland_socket(display, event_loop)?;
         let bindings = keys::parse_bindings(&config.keybindings, backend.mod_is_logo());
         let layout = layout::from_kind(config.layout, &config);
@@ -491,6 +491,7 @@ impl Meridian {
         self.bindings = keys::parse_bindings(&config.keybindings, self.backend.mod_is_logo());
         let layout_changed = config.layout != self.layout.kind();
         let new_layout = config.layout;
+        self.effects.set_flags(config.effects);
         self.config = config;
         self.themes = Themes::load();
         self.config_generation += 1;
@@ -574,6 +575,7 @@ impl Meridian {
         if theme != self.effects.theme() {
             tracing::info!("mood: {}", mood.name());
             self.effects.set_theme(theme);
+            self.queue_redraw("mood");
             self.ipc_broadcast();
         }
     }
@@ -585,9 +587,23 @@ impl Meridian {
         let (sender, receiver) = channel::<WallpaperImage>();
         let inserted = self.loop_handle.insert_source(receiver, |event, _, state| {
             if let ChannelEvent::Msg(image) = event {
-                state
-                    .effects
-                    .set_wallpaper_image(state.backend.renderer(), &image.pixels, image.width, image.height);
+                match image.landscape {
+                    // The drawn landscape, painted for one size and theme.
+                    Some(theme) => state.effects.set_landscape(
+                        state.backend.renderer(),
+                        &image.pixels,
+                        (image.width as i32, image.height as i32).into(),
+                        theme,
+                    ),
+                    // The user's own picture.
+                    None => state.effects.set_wallpaper_image(
+                        state.backend.renderer(),
+                        &image.pixels,
+                        image.width,
+                        image.height,
+                    ),
+                }
+                state.queue_redraw("wallpaper");
             }
         });
         if inserted.is_ok() {
@@ -603,6 +619,7 @@ impl Meridian {
         let path = self.config.appearance.wallpaper.trim().to_string();
         if path.is_empty() {
             self.effects.clear_wallpaper_image();
+            self.queue_redraw("wallpaper");
             return;
         }
         let Some(sender) = self.wallpaper_sender.clone() else { return };
@@ -620,6 +637,7 @@ impl Meridian {
                     pixels: image.into_raw(),
                     width,
                     height,
+                    landscape: None,
                 });
             }
             Err(err) => tracing::error!("wallpaper {}: {err}", path.display()),
@@ -865,6 +883,22 @@ impl Meridian {
             });
         }
 
+        // If the last frame had to use the wallpaper shader because the
+        // ready-made landscape was missing, paint it now on a worker thread.
+        if let Some((size, theme)) = self.effects.take_landscape_request()
+            && let Some(sender) = self.wallpaper_sender.clone()
+        {
+            std::thread::spawn(move || {
+                let pixels = crate::effects::paint_landscape(size.w, size.h, &theme);
+                let _ = sender.send(WallpaperImage {
+                    pixels,
+                    width: size.w as u32,
+                    height: size.h as u32,
+                    landscape: Some(theme),
+                });
+            });
+        }
+
         // Counted per surface we signalled, whether or not it was waiting.
         self.stats.frame_callbacks(callbacks);
         self.lock_after_frame(output);
@@ -881,6 +915,9 @@ pub struct WallpaperImage {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// `Some(theme)` if this is the drawn landscape for that theme rather
+    /// than the user's picture.
+    pub landscape: Option<meridian_common::theme::Theme>,
 }
 
 /// The hour of the day (0-23) in local time.

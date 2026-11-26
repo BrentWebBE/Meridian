@@ -24,6 +24,7 @@ pub struct Config {
     pub tiled: Tiled,
     pub dock: Dock,
     pub desktop: Desktop,
+    pub effects: Effects,
     /// Key combination (e.g. "Mod+Return") to action.
     pub keybindings: HashMap<String, Action>,
 }
@@ -90,6 +91,19 @@ pub struct Dock {
     pub running_dots: bool,
     /// Desktop file ids without ".desktop", e.g. "org.gnome.Nautilus".
     pub pinned: Vec<String>,
+}
+
+/// Visual extras drawn by the compositor. Each costs nothing when off.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Effects {
+    /// Round window corners. Needs one off-screen pass per window.
+    pub rounded_corners: bool,
+    /// Draw a shadow behind each window.
+    pub shadows: bool,
+    /// Let the display show client buffers directly where possible.
+    /// Faster, but where driver bugs live; off until measured stable.
+    pub direct_scanout: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

@@ -162,6 +162,10 @@ impl Meridian {
     /// Tell all clients about the current state, if it changed.
     /// Call this after anything that affects windows, focus or layout.
     pub fn ipc_broadcast(&mut self) {
+        // Everything that calls this changed something visible (focus,
+        // windows, layout, mood, overview), so it is also the place to ask
+        // for a redraw.
+        self.queue_redraw("state");
         let state = self.ipc_state();
         if self.ipc.last_state.as_ref() == Some(&state) {
             return;

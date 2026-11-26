@@ -179,6 +179,21 @@ pub struct Effects {
     theme: Cell<Theme>,
     /// The user's wallpaper image, if one is set and has been loaded.
     wallpaper_image: RefCell<Option<WallpaperTexture>>,
+    /// Which effects are switched on (from the config).
+    flags: Cell<meridian_common::config::Effects>,
+    /// The drawn landscape as ready-made textures, one per output size.
+    landscapes: RefCell<Vec<Landscape>>,
+    /// A landscape a render pass found missing; picked up after the frame.
+    landscape_wanted: Cell<Option<(Size<i32, Physical>, Theme)>>,
+    /// The landscape a worker thread is painting right now.
+    landscape_pending: Cell<Option<(Size<i32, Physical>, Theme)>>,
+}
+
+/// The landscape painted for one output size and theme.
+struct Landscape {
+    size: Size<i32, Physical>,
+    theme: Theme,
+    buffer: TextureBuffer<GlesTexture>,
 }
 
 impl Effects {
@@ -191,7 +206,19 @@ impl Effects {
         self.theme.set(theme);
     }
 
-    pub fn compile(renderer: &mut GlesRenderer, theme: Theme) -> anyhow::Result<Self> {
+    pub fn flags(&self) -> meridian_common::config::Effects {
+        self.flags.get()
+    }
+
+    pub fn set_flags(&self, flags: meridian_common::config::Effects) {
+        self.flags.set(flags);
+    }
+
+    pub fn compile(
+        renderer: &mut GlesRenderer,
+        theme: Theme,
+        flags: meridian_common::config::Effects,
+    ) -> anyhow::Result<Self> {
         let rounded_texture = renderer
             .compile_custom_texture_shader(
                 ROUNDED_TEXTURE.replace("ROUNDED_BOX", ROUNDED_BOX),
@@ -237,6 +264,10 @@ impl Effects {
             wallpaper,
             theme: Cell::new(theme),
             wallpaper_image: RefCell::new(None),
+            flags: Cell::new(flags),
+            landscapes: RefCell::new(Vec::new()),
+            landscape_wanted: Cell::new(None),
+            landscape_pending: Cell::new(None),
         })
     }
 
@@ -281,6 +312,65 @@ impl Effects {
             Some(size),
             Kind::Unspecified,
         ))
+    }
+
+    /// The drawn landscape as a plain texture, if it has been painted for
+    /// this output size and the current theme. Drawing a ready texture is
+    /// as cheap as it gets; the shader version computes every pixel anew.
+    ///
+    /// When the texture is missing this returns `None` (the caller falls
+    /// back to the shader for now) and notes that it is wanted.
+    pub fn landscape(
+        &self,
+        physical: Size<i32, Physical>,
+        logical: Size<i32, Logical>,
+    ) -> Option<TextureRenderElement<GlesTexture>> {
+        let theme = self.theme.get();
+        let landscapes = self.landscapes.borrow();
+        match landscapes.iter().find(|l| l.size == physical && l.theme == theme) {
+            Some(landscape) => Some(TextureRenderElement::from_texture_buffer(
+                (0.0, 0.0),
+                &landscape.buffer,
+                None,
+                None,
+                Some(logical),
+                Kind::Unspecified,
+            )),
+            None => {
+                if self.landscape_pending.get() != Some((physical, theme)) {
+                    self.landscape_wanted.set(Some((physical, theme)));
+                }
+                None
+            }
+        }
+    }
+
+    /// The landscape that should be painted next, if any. The caller hands
+    /// it to a worker thread and later calls `set_landscape`.
+    pub fn take_landscape_request(&self) -> Option<(Size<i32, Physical>, Theme)> {
+        let wanted = self.landscape_wanted.take()?;
+        self.landscape_pending.set(Some(wanted));
+        Some(wanted)
+    }
+
+    /// Store a landscape painted by `paint_landscape` (RGBA pixels).
+    pub fn set_landscape(&self, renderer: &mut GlesRenderer, pixels: &[u8], size: Size<i32, Physical>, theme: Theme) {
+        self.landscape_pending.set(None);
+        let buffer_size: Size<i32, Buffer> = (size.w, size.h).into();
+        match renderer.import_memory(pixels, Fourcc::Abgr8888, buffer_size, false) {
+            Ok(texture) => {
+                let buffer = TextureBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+                let mut landscapes = self.landscapes.borrow_mut();
+                // One per output size; older themes for that size are dropped.
+                landscapes.retain(|l| l.size != size);
+                landscapes.push(Landscape { size, theme, buffer });
+                // A handful of monitors at most; do not grow without bound.
+                if landscapes.len() > 4 {
+                    landscapes.remove(0);
+                }
+            }
+            Err(err) => tracing::warn!("could not upload the wallpaper: {err}"),
+        }
     }
 
     /// The wallpaper for an output of the given size. Kept in the output's
@@ -389,7 +479,9 @@ impl Effects {
         }
 
         match cached.as_ref() {
-            Some(backdrop) => vec![backdrop.outline.clone(), backdrop.shadow.clone()],
+            Some(backdrop) if self.flags.get().shadows => vec![backdrop.outline.clone(), backdrop.shadow.clone()],
+            // Shadows off: only the thin outline that marks the focus.
+            Some(backdrop) => vec![backdrop.outline.clone()],
             None => Vec::new(),
         }
     }
@@ -680,5 +772,73 @@ impl RenderElement<GlesRenderer> for RoundedTextureElement {
             Some(&self.program),
             &self.uniforms,
         )
+    }
+}
+
+/// Paint the landscape (sky, sun, three hills) into RGBA pixels on the CPU.
+///
+/// The same composition as the `WALLPAPER` shader. This takes tens of
+/// milliseconds for a large screen, so it is meant for a worker thread;
+/// the result is uploaded once and reused for every frame after.
+pub fn paint_landscape(width: i32, height: i32, theme: &Theme) -> Vec<u8> {
+    let (w, h) = (width.max(1) as f32, height.max(1) as f32);
+    // Center x, center y, radius x, radius y of each shape, and its color.
+    let shapes = [
+        (0.76 * w, 0.205 * h, 0.083 * h, 0.083 * h, theme.sun),
+        (0.30 * w, 0.668 * h + 0.60 * h, 0.70 * w, 0.60 * h, theme.hills[0]),
+        (0.83 * w, 0.757 * h + 0.55 * h, 0.62 * w, 0.55 * h, theme.hills[1]),
+        (0.28 * w, 0.866 * h + 0.46 * h, 0.62 * w, 0.46 * h, theme.hills[2]),
+    ];
+    let mut pixels = Vec::with_capacity((width.max(1) * height.max(1) * 4) as usize);
+
+    for y in 0..height.max(1) {
+        for x in 0..width.max(1) {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut color = [theme.sky.r, theme.sky.g, theme.sky.b];
+            for (cx, cy, rx, ry, shape) in shapes {
+                // Distance to the ellipse edge in pixels (approximate),
+                // turned into a coverage between 0 and 1 for a smooth edge.
+                let (dx, dy) = ((px - cx) / rx, (py - cy) / ry);
+                let distance = ((dx * dx + dy * dy).sqrt() - 1.0) * rx.min(ry);
+                let coverage = (0.5 - distance / 1.5).clamp(0.0, 1.0);
+                if coverage > 0.0 {
+                    color[0] += (shape.r - color[0]) * coverage;
+                    color[1] += (shape.g - color[1]) * coverage;
+                    color[2] += (shape.b - color[2]) * coverage;
+                }
+            }
+            pixels.extend_from_slice(&[
+                (color[0] * 255.0).round() as u8,
+                (color[1] * 255.0).round() as u8,
+                (color[2] * 255.0).round() as u8,
+                255,
+            ]);
+        }
+    }
+    pixels
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn landscape_has_sky_on_top_and_the_near_hill_at_the_bottom() {
+        let theme = meridian_common::theme::Themes::builtin().morning;
+        let (width, height) = (320, 200);
+        let pixels = paint_landscape(width, height, &theme);
+        assert_eq!(pixels.len(), (width * height * 4) as usize);
+
+        let pixel = |x: i32, y: i32| {
+            let i = ((y * width + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        let rgba = |c: meridian_common::theme::Color| {
+            [(c.r * 255.0).round() as u8, (c.g * 255.0).round() as u8, (c.b * 255.0).round() as u8, 255]
+        };
+        assert_eq!(pixel(2, 2), rgba(theme.sky));
+        assert_eq!(pixel(width / 4, height - 2), rgba(theme.hills[2]));
+        // The middle of the sun.
+        assert_eq!(pixel((0.76 * width as f32) as i32, (0.205 * height as f32) as i32), rgba(theme.sun));
     }
 }

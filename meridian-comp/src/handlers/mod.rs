@@ -42,6 +42,7 @@ impl SeatHandler for Meridian {
     // nested, the host desktop draws the cursor and this is unused.
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
         self.cursor_status = image;
+        self.queue_redraw("cursor");
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

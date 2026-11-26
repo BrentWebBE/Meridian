@@ -1,7 +1,8 @@
 #!/bin/sh
 # Baseline measurements in nested mode (a window on the current desktop).
 #   scripts/baseline-nested.sh [OUTPUT_DIR]
-# Takes about 11 minutes. Uses the release build in target/release.
+# Takes about 11 minutes, or 2 with QUICK=1 (skips the 10-minute memory
+# check). Uses the release build in target/release.
 #
 # Measures: idle CPU over 60 s, memory after 1 and 10 minutes, CPU while
 # locked. It cannot move windows or unlock: nothing here can inject input.
@@ -16,8 +17,8 @@ comp=$!
 sleep 10
 echo "== idle, 60 s (one terminal open, nothing moving)" | tee "$out/summary.txt"
 scripts/cpu-sample.sh 60 $shell alacritty | tee -a "$out/summary.txt"
-echo "== memory after 10 minutes" | tee -a "$out/summary.txt"
-sleep 520
+if [ -z "${QUICK:-}" ]; then sleep 520; fi
+echo "== memory after 10 minutes (or right away with QUICK=1)" | tee -a "$out/summary.txt"
 scripts/cpu-sample.sh 10 $shell | tee -a "$out/summary.txt"
 echo "== locked, 15 s" | tee -a "$out/summary.txt"
 sock="$XDG_RUNTIME_DIR/meridian-$(grep -o 'WAYLAND_DISPLAY=[a-z0-9-]*' "$out/comp.log" | head -1 | cut -d= -f2).sock"

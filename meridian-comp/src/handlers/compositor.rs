@@ -48,6 +48,8 @@ impl CompositorHandler for Meridian {
         }
 
         xdg_shell::handle_commit(self, surface);
+        // The client has new content: show it at the next opportunity.
+        self.queue_redraw("commit");
         self.layer_commit(surface);
     }
 }
