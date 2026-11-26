@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Terra (Meridian)
 Comment=The Terra desktop on the Meridian Wayland compositor
-Exec=meridian-comp
-TryExec=meridian-comp
+Exec=meridian-session
+TryExec=meridian-session
 Type=Application
 DesktopNames=Meridian

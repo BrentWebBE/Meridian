@@ -732,9 +732,74 @@ impl Meridian {
         }
     }
 
+    /// Run as a systemd user session: publish our environment to systemd
+    /// and D-Bus, then start `meridian-session.target`, which pulls in the
+    /// shell programs as units that are restarted when they crash.
+    ///
+    /// Both steps talk to other processes and can take a while, so they
+    /// run on a worker thread. If they fail, the result comes back through
+    /// a channel and we start the shell programs ourselves instead.
+    pub fn start_systemd_session(&mut self) {
+        let (sender, receiver) = channel::<bool>();
+        let inserted = self.loop_handle.insert_source(receiver, |event, _, state| {
+            if let ChannelEvent::Msg(started) = event {
+                if started {
+                    tracing::info!("meridian-session.target started");
+                    // Our own programs are units now; start only what the
+                    // user added to `autostart`.
+                    state.autostart_matching(|program| !program.starts_with("meridian-"));
+                } else {
+                    tracing::error!("could not start the systemd session; starting the shell programs directly");
+                    state.autostart();
+                }
+            }
+        });
+        if inserted.is_err() {
+            self.autostart();
+            return;
+        }
+
+        // What the units and D-Bus-activated services need to find us.
+        let mut variables = vec![
+            format!("WAYLAND_DISPLAY={}", self.socket_name.to_string_lossy()),
+            "XDG_CURRENT_DESKTOP=Meridian".to_string(),
+            "XDG_SESSION_TYPE=wayland".to_string(),
+            "XDG_SESSION_DESKTOP=meridian".to_string(),
+        ];
+        if let Some(socket) = &self.ipc_socket {
+            variables.push(format!("{}={}", meridian_common::ipc::SOCKET_ENV, socket.display()));
+        }
+        if let Ok(platform) = std::env::var("QT_QPA_PLATFORM") {
+            variables.push(format!("QT_QPA_PLATFORM={platform}"));
+        }
+
+        std::thread::spawn(move || {
+            let run = |program: &str, args: &[&str]| {
+                Command::new(program)
+                    .args(args)
+                    .status()
+                    .is_ok_and(|status| status.success())
+            };
+            // `--systemd` updates the systemd user manager as well as D-Bus.
+            let mut export = vec!["--systemd"];
+            export.extend(variables.iter().map(String::as_str));
+            let started = run("dbus-update-activation-environment", &export)
+                && run("systemctl", &["--user", "start", "meridian-session.target"]);
+            let _ = sender.send(started);
+        });
+    }
+
     /// Start the programs listed under `autostart` in the config.
     pub fn autostart(&self) {
+        self.autostart_matching(|_| true);
+    }
+
+    /// Start the `autostart` programs whose name passes `wanted`.
+    fn autostart_matching(&self, wanted: impl Fn(&str) -> bool) {
         for command_line in &self.config.autostart {
+            if !command_line.split_whitespace().next().is_some_and(&wanted) {
+                continue;
+            }
             let mut parts = command_line.split_whitespace().map(String::from);
             if let Some(program) = parts.next() {
                 let args: Vec<String> = parts.collect();

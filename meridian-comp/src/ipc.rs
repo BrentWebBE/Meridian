@@ -155,6 +155,7 @@ impl Meridian {
             overview: self.overview,
             theme: self.effects.theme().mood.name().to_string(),
             config_generation: self.config_generation,
+            nested: matches!(self.backend, crate::backend::Backend::Winit(_)),
         }
     }
 

@@ -136,6 +136,7 @@ fn build_ui(app: &gtk::Application) {
             overview: false,
             theme: String::new(),
             config_generation: 0,
+            nested: false,
         }),
         config: RefCell::new(config),
         hide_timer: RefCell::new(None),

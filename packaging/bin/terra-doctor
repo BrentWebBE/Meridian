@@ -1,0 +1,104 @@
+#!/bin/sh
+# terra-doctor: checks what a Terra (Meridian) session needs and prints
+# PASS / FAIL / SKIP with a hint for each. Run it inside the session.
+# Exit status is the number of FAILs.
+
+fails=0
+pass() { printf '  PASS  %s\n' "$1"; }
+fail() { printf '  FAIL  %s\n        fix: %s\n' "$1" "$2"; fails=$((fails + 1)); }
+skip() { printf '  SKIP  %s\n        %s\n' "$1" "$2"; }
+section() { printf '\n%s\n' "$1"; }
+
+# Who owns a name on the session bus (process name), or nothing.
+bus_owner() {
+    pid=$(gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+        --method org.freedesktop.DBus.GetConnectionUnixProcessID "$1" 2>/dev/null |
+        sed -n 's/.*uint32 \([0-9]*\).*/\1/p')
+    [ -n "$pid" ] && ps -o comm= -p "$pid"
+}
+unit_active() { systemctl --user is-active --quiet "$1"; }
+installed() { pacman -Q "$1" >/dev/null 2>&1; }
+
+section "Session"
+if pgrep -x meridian-comp >/dev/null; then pass "compositor is running"
+else fail "compositor is not running" "log in through 'Terra (Meridian)' or run meridian-session on a text console"; fi
+
+in_session=no
+if [ "${XDG_CURRENT_DESKTOP:-}" = "Meridian" ]; then
+    in_session=yes
+    pass "this shell is inside a Terra session (XDG_CURRENT_DESKTOP=Meridian)"
+else
+    skip "this shell is not inside a Terra session (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})" \
+        "session checks below describe whatever session you are in now"
+fi
+if pgrep -af 'meridian-comp' | grep -q -- '--winit'; then
+    skip "a nested dev-mode compositor is running" "nested mode is not a full session; nothing below applies to it"
+fi
+
+section "systemd user session"
+if unit_active meridian-session.target; then pass "meridian-session.target is active"
+else fail "meridian-session.target is not active" "start the session with meridian-session, not meridian-comp directly"; fi
+if unit_active graphical-session.target; then pass "graphical-session.target is active"
+else fail "graphical-session.target is not active" "it starts together with meridian-session.target"; fi
+for unit in bar dock desktop notify launcher; do
+    if unit_active "meridian-$unit.service"; then pass "meridian-$unit.service is running"
+    else fail "meridian-$unit.service is not running" "systemctl --user status meridian-$unit.service"; fi
+done
+environment=$(systemctl --user show-environment 2>/dev/null)
+for variable in WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE MERIDIAN_SOCKET; do
+    if printf '%s\n' "$environment" | grep -q "^$variable="; then pass "systemd knows $variable"
+    else fail "systemd does not know $variable" "the compositor imports it when started with --session"; fi
+done
+
+section "Notifications"
+owner=$(bus_owner org.freedesktop.Notifications)
+case "$owner" in
+    meridian-notify) pass "meridian-notify owns org.freedesktop.Notifications" ;;
+    "") fail "nobody owns org.freedesktop.Notifications" "systemctl --user start meridian-notify.service" ;;
+    *) if [ "$in_session" = yes ]; then fail "'$owner' owns org.freedesktop.Notifications, not meridian-notify" "stop the other notification daemon"
+       else skip "'$owner' owns org.freedesktop.Notifications" "expected outside a Terra session"; fi ;;
+esac
+
+section "Portals"
+if installed xdg-desktop-portal; then pass "xdg-desktop-portal is installed"
+else fail "xdg-desktop-portal is not installed" "sudo pacman -S xdg-desktop-portal xdg-desktop-portal-gtk"; fi
+if installed xdg-desktop-portal-gtk; then pass "xdg-desktop-portal-gtk (file chooser, settings) is installed"
+else fail "xdg-desktop-portal-gtk is not installed" "sudo pacman -S xdg-desktop-portal-gtk"; fi
+if [ -f /usr/share/xdg-desktop-portal/meridian-portals.conf ] || [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/meridian-portals.conf" ]; then
+    pass "a portals.conf for Meridian exists"
+else fail "no meridian-portals.conf: no portal backend is selected in a Terra session" "not shipped yet (see STABILIZATION.md, step 3)"; fi
+if [ -n "$(bus_owner org.freedesktop.portal.Desktop)" ]; then pass "xdg-desktop-portal is on the bus"
+else fail "xdg-desktop-portal is not running" "systemctl --user start xdg-desktop-portal.service"; fi
+
+section "Audio"
+for unit in pipewire wireplumber; do
+    if unit_active "$unit.service" || unit_active "$unit.socket"; then pass "$unit is active"
+    else fail "$unit is not active" "systemctl --user enable --now $unit.service"; fi
+done
+
+section "Authentication and secrets"
+if pgrep -f 'polkit.*agent|polkit-gnome|lxqt-policykit|mate-polkit|hyprpolkitagent' >/dev/null; then pass "a polkit authentication agent is running"
+else fail "no polkit authentication agent: pkexec and admin prompts cannot ask for a password" "not started by the session yet (see STABILIZATION.md, step 3)"; fi
+if [ -n "$(bus_owner org.freedesktop.secrets)" ]; then pass "a keyring owns org.freedesktop.secrets"
+else fail "no keyring on the bus: apps cannot store passwords" "sudo pacman -S gnome-keyring, then log in again"; fi
+if [ -f /etc/pam.d/meridian-lock ]; then pass "lock screen PAM rules are installed"
+else fail "/etc/pam.d/meridian-lock is missing: the lock screen refuses to lock" "reinstall the meridian-git package"; fi
+
+section "Tray and clipboard"
+if [ -n "$(bus_owner org.kde.StatusNotifierWatcher)" ]; then pass "a tray watcher owns org.kde.StatusNotifierWatcher"
+else fail "no tray: apps with tray icons have nowhere to show them" "not implemented yet (see STABILIZATION.md, step 3)"; fi
+if pgrep -x 'wl-clip-persist|cliphist|clipman|wl-paste' >/dev/null; then pass "a clipboard manager is running"
+else fail "no clipboard manager: copied text is lost when the source app closes" "not possible yet, the compositor lacks the data-control protocol (step 3)"; fi
+
+section "X11 apps"
+if pgrep -x 'xwayland-satelli|Xwayland' >/dev/null && [ -n "${DISPLAY:-}" ]; then pass "XWayland is running (DISPLAY=$DISPLAY)"
+else fail "no XWayland: X11-only apps do not start" "not wired up yet (see STABILIZATION.md, step 3)"; fi
+
+section "Qt"
+for package in qt5-wayland qt6-wayland; do
+    if installed "$package"; then pass "$package is installed"
+    else fail "$package is not installed: Qt apps fall back to X11 or fail" "sudo pacman -S $package"; fi
+done
+
+printf '\n%s check(s) failed.\n' "$fails"
+exit "$fails"

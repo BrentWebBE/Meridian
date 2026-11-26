@@ -26,6 +26,10 @@ pub struct Winit {
 pub fn init() -> anyhow::Result<(Winit, WinitEventLoop)> {
     let (graphics, events) = winit::init::<GlesRenderer>()
         .map_err(|err| anyhow::anyhow!("failed to open the host window: {err}"))?;
+    // Nobody should mistake this window for the real session.
+    graphics
+        .window()
+        .set_title("Meridian (nested dev mode, not a full session)");
     Ok((Winit { graphics }, events))
 }
 

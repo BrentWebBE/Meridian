@@ -1,0 +1,12 @@
+[Unit]
+Description=Terra top bar
+Documentation=https://github.com/BrentWebBE/Meridian
+# Stopped and restarted together with the session.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/meridian-bar
+# Come back after a crash, but not after a clean exit at logout.
+Restart=on-failure
+RestartSec=1

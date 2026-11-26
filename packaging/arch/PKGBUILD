@@ -61,6 +61,11 @@ package() {
   # Lets Find and the dock list the Settings app.
   install -Dm644 packaging/applications/org.meridian.Settings.desktop \
     "$pkgdir/usr/share/applications/org.meridian.Settings.desktop"
+  # The session: a script for login managers, and systemd user units that
+  # run each shell program and restart it if it crashes.
+  install -Dm755 packaging/session/meridian-session "$pkgdir/usr/bin/meridian-session"
+  install -Dm755 packaging/bin/terra-doctor "$pkgdir/usr/bin/terra-doctor"
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" packaging/systemd/*
   # Makes "Meridian" selectable in login managers such as GDM and SDDM.
   install -Dm644 packaging/session/meridian.desktop "$pkgdir/usr/share/wayland-sessions/meridian.desktop"
 }

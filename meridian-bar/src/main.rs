@@ -74,6 +74,15 @@ fn build_ui(app: &gtk::Application) {
     left.append(&menu_button);
     left.append(&app_name);
     left.append(&app_menu);
+    // Shown only when the compositor says it runs nested.
+    let nested = gtk::Label::builder()
+        .label("Nested dev mode")
+        .css_classes(["nested"])
+        .tooltip_text("Running as a window inside another desktop. This is not a full session.")
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    left.append(&nested);
 
     // ---- right: tray and clock --------------------------------------------
     let network = gtk::Image::new();
@@ -140,7 +149,7 @@ fn build_ui(app: &gtk::Application) {
         ),
     );
 
-    watch_compositor(app_name, app_menu, spaces);
+    watch_compositor(app_name, app_menu, spaces, nested);
 
     window.present();
 }
@@ -232,7 +241,7 @@ fn show_spaces(spaces: &gtk::Box, state: &State) {
 }
 
 /// Show the focused application's name and the spaces, as reported by the compositor.
-fn watch_compositor(app_name: gtk::Label, app_menu: gtk::Box, spaces: gtk::Box) {
+fn watch_compositor(app_name: gtk::Label, app_menu: gtk::Box, spaces: gtk::Box, nested: gtk::Label) {
     let connection = match Connection::connect() {
         Ok(connection) => connection,
         Err(err) => {
@@ -256,6 +265,7 @@ fn watch_compositor(app_name: gtk::Label, app_menu: gtk::Box, spaces: gtk::Box) 
                     // Menus only make sense when an app is focused.
                     app_menu.set_visible(state.windows.iter().any(|window| window.focused));
                     show_spaces(&spaces, state);
+                    nested.set_visible(state.nested);
                 }
                 glib::ControlFlow::Continue
             }
