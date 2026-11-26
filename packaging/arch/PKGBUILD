@@ -8,7 +8,7 @@
 # AUR package with a `source=("git+https://...")` line.
 
 pkgname=meridian-git
-pkgver=0.13.0
+pkgver=0.14.0
 pkgrel=1
 pkgdesc="The Terra desktop: a Wayland compositor, bar, dock, launcher, settings and lock screen in Rust"
 arch=('x86_64' 'aarch64')

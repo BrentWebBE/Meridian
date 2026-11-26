@@ -5,6 +5,7 @@
 //! protocol: instead of a normal window, the compositor gives us a strip
 //! anchored to the top edge and keeps other windows out of it.
 
+mod sni;
 mod tray;
 
 use std::{cell::RefCell, rc::Rc};
@@ -93,6 +94,8 @@ fn build_ui(app: &gtk::Application) {
 
     let right = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     right.add_css_class("status");
+    // Icons from background apps come first, then our own status icons.
+    right.append(&sni::tray());
     right.append(&network);
     right.append(&volume);
     right.append(&battery);

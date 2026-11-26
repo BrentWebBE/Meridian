@@ -310,15 +310,68 @@ bar's clock and tray).
   motion with a zero duration.
 - **Moving a window:** still not measurable here.
 
+## Step 3: required services
+
+Status: written; most of it verified in nested mode or on a private D-Bus
+session with the real helper programs. Nothing verified inside a real
+session yet.
+
+| Item | Before | After | How it was checked |
+|---|---|---|---|
+| Clipboard persistence | **MISSING**: `wl-paste` says "Nothing is copied" once the source app exits | **WORKS**: text still pastes after the source exits; primary selection works | Nested, `wl-copy` / `wl-paste`, `wl-clip-persist` from the Arch package running on the new `ext-data-control` / `wlr-data-control` protocols |
+| XWayland | **MISSING**: X11 apps cannot start | **WORKS** nested: `glxgears` opened and ran at 120 FPS | `xwayland-satellite :12` from the Arch package against the nested compositor (needed the new `viewporter` protocol) |
+| Portals | **BROKEN**: no config, no backend chosen | **WORKS** for file chooser and settings; screenshot and screencast **MISSING** | Private bus with `XDG_CURRENT_DESKTOP=Meridian` and our `meridian-portals.conf`: `FileChooser.OpenFile` opened the GTK dialog as a window in the compositor, `Settings.Read` answered, `Screenshot` is not offered |
+| Notifications | Partial: body only | **WORKS**: capabilities `body`, `actions`, `icon-static`; expiry, replace-by-id, critical urgency, close-by-call | Private bus, `gdbus call` and `gdbus monitor`: `NotificationClosed(1, 1)` after expiry, `(2, 3)` after `CloseNotification`; screenshot shows the critical card with its buttons 4 s after a 2 s timeout |
+| Tray | **MISSING** | **WORKS** for showing items | Private bus, scripted StatusNotifierItem: registered item listed by the watcher, icon in the bar (screenshot), removed when the app quit; 20 appear/vanish cycles left the bar running, no items, PSS 83,320 -> 83,352 kB |
+| polkit agent | **MISSING** | Unit added, **UNVERIFIED** | `meridian-polkit-agent.service` starts the first installed agent. Verify in a session: `pkexec true` should ask for the password |
+| PipeWire / WirePlumber | Present on the system | Wanted by the session target, **UNVERIFIED** | Verify in a session: `terra-doctor` (Audio section) |
+| Keyring | **MISSING** in a session | Secret portal routed to gnome-keyring, **UNVERIFIED** | gnome-keyring is D-Bus activated and unlocked by the login manager's PAM setup. Verify: `terra-doctor` (Authentication section) |
+| `terra-doctor` | n/a | **WORKS** | Run in the host session; exit status equals the number of FAILs |
+
+### What changed
+
+- **Compositor protocols:** `ext-data-control`, `wlr-data-control`,
+  `primary-selection`, `viewporter`.
+- **Session units** (each skipped when its program is not installed):
+  `meridian-clipboard.service` (`wl-clip-persist`),
+  `meridian-xwayland.service` (`xwayland-satellite`),
+  `meridian-polkit-agent.service` (first installed agent). The target also
+  wants `pipewire.socket`, `pipewire-pulse.socket`, `wireplumber.service`.
+- **`DISPLAY`:** the session script picks a free X display number and exports
+  it; the compositor passes it to systemd and D-Bus and only strips `DISPLAY`
+  from child processes when nested (where it is the host's).
+- **`meridian-portals.conf`:** GTK backend by default, gnome-keyring for
+  secrets, screenshot / screencast / remote desktop switched off.
+- **Notifications:** actions as buttons, `ActionInvoked`, the default action
+  on a click, urgency (critical never expires).
+- **Tray:** the bar owns `org.kde.StatusNotifierWatcher`, shows each item's
+  icon (theme name or pixels) and title, forwards a left click as `Activate`,
+  and draws the item's dbusmenu in its own small window on a right click. All
+  D-Bus calls are asynchronous.
+- **Package dependencies:** `wl-clip-persist`, `xdg-desktop-portal` and
+  `xdg-desktop-portal-gtk` are now required; `xwayland-satellite`,
+  `polkit-gnome`, `gnome-keyring`, `pipewire-pulse` and the Qt Wayland
+  plugins are optional with a reason each.
+
+### Not done or not verified
+
+- **Screenshot and screencast portals:** no backend can capture this
+  compositor. The compositor implements no screen-copy protocol, which
+  `xdg-desktop-portal-wlr` would need. The Print key still saves a screenshot.
+- **`ActionInvoked` and tray clicks/menus:** need a pointer click. The menu
+  parser is unit-tested; the menu window has never been seen.
+- **XWayland scale:** only checked at scale 1 nested. HiDPI is unverified.
+- **Everything as real session units:** verify with `terra-doctor`.
+
 ## Still broken (running list)
 
 Ranked by expected user impact; re-ranked as measurements come in.
 
-1. The real session has never run on hardware. Its new render loop, the
-   systemd session and the logout path are all unverified.
-2. No portals configuration, polkit agent, keyring start, tray, clipboard
-   manager or XWayland in a Terra session (step 0.3).
+1. The real session has never run on hardware. Its render loop, the systemd
+   session, every session unit and the logout path are unverified.
+2. No screenshot or screencast portal (step 3).
 3. Occasional 18 to 23 ms frames when windows open (step 2).
 4. Lock screen unlock path never tested with a real password.
 5. Ten `expect`/`unwrap` sites in the compositor and no panic hook (step 4).
 6. Popups do not close on an outside click; several protocols missing (0.7).
+7. Tray menus, notification action clicks and the polkit agent are untested.
