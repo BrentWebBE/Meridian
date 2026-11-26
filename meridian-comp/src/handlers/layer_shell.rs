@@ -91,7 +91,9 @@ impl Meridian {
             states
                 .data_map
                 .get::<LayerSurfaceData>()
-                .map(|data| data.lock().unwrap().initial_configure_sent)
+                // A poisoned lock (a panic elsewhere while it was held) is
+                // treated like "not sent yet" rather than panicking again.
+                .and_then(|data| data.lock().ok().map(|data| data.initial_configure_sent))
                 .unwrap_or(false)
         });
 

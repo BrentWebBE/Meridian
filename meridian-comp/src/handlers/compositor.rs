@@ -22,11 +22,15 @@ impl CompositorHandler for Meridian {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        // Every client was inserted with a `ClientState` (see state.rs).
-        &client
-            .get_data::<ClientState>()
-            .expect("client was created with ClientState")
-            .compositor_state
+        // Every client is inserted with a `ClientState` (see state.rs). If
+        // one ever is not, hand out a shared spare instead of panicking:
+        // a compositor must survive anything a client does.
+        static SPARE: std::sync::LazyLock<CompositorClientState> =
+            std::sync::LazyLock::new(CompositorClientState::default);
+        match client.get_data::<ClientState>() {
+            Some(state) => &state.compositor_state,
+            None => &SPARE,
+        }
     }
 
     /// A client "commits" a surface to apply everything it changed since the

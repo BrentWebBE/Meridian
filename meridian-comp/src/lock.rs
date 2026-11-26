@@ -52,6 +52,7 @@ impl SessionLockHandler for Meridian {
         // From the next frame on only lock surfaces are drawn, so we can
         // confirm: the client may now show its unlock dialog.
         confirmation.lock();
+        self.ipc_broadcast(); // `locked` is part of the published state
         self.queue_redraw("lock");
         self.start_lock_watchdog();
     }

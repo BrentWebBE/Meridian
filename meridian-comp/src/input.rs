@@ -44,7 +44,7 @@ impl Meridian {
             // Real mice report movement ("3 px right"), the nested window
             // reports positions ("at 40%, 60% of the window").
             InputEvent::PointerMotion { event, .. } => {
-                let pointer = self.seat.get_pointer().expect("seat has a pointer");
+                let Some(pointer) = self.seat.get_pointer() else { return };
                 let pos = self.clamp_to_outputs(pointer.current_location() + event.delta());
                 self.move_pointer(pos, event.time());
             }
@@ -64,7 +64,7 @@ impl Meridian {
         let time = Event::time(&event);
         let keycode = event.key_code();
         let key_state = event.state();
-        let keyboard = self.seat.get_keyboard().expect("seat has a keyboard");
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
 
         // `input` updates the keyboard state (modifiers, layout) and then calls
         // our filter. `Forward` sends the key to the focused client;
@@ -149,7 +149,7 @@ impl Meridian {
 
     fn move_pointer(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         let under = self.surface_under(pos);
-        let pointer = self.seat.get_pointer().expect("seat has a pointer");
+        let Some(pointer) = self.seat.get_pointer() else { return };
 
         pointer.motion(
             self,
@@ -165,8 +165,8 @@ impl Meridian {
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
-        let pointer = self.seat.get_pointer().expect("seat has a pointer");
-        let keyboard = self.seat.get_keyboard().expect("seat has a keyboard");
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
         let serial = SERIAL_COUNTER.next_serial();
         let button = event.button_code();
 
@@ -316,7 +316,7 @@ impl Meridian {
             }
         }
 
-        let pointer = self.seat.get_pointer().expect("seat has a pointer");
+        let Some(pointer) = self.seat.get_pointer() else { return };
         pointer.axis(self, frame);
         pointer.frame(self);
     }
